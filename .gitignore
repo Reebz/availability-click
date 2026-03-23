@@ -22,3 +22,5 @@ Package.resolved
 
 # Environment
 .env*.local
+CalendarClick.xcodeproj/xcuserdata/
+CalendarClick.xcodeproj/project.xcworkspace/xcuserdata/
