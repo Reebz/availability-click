@@ -4,12 +4,17 @@ final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem!
     private var animationTimer: Timer?
 
+    /// Called when user left-clicks the icon
+    var onLeftClick: (() -> Void)?
+
+    /// Called when user selects a range from the right-click menu
+    var onRangeSelected: ((DateRangeType) -> Void)?
+
     func setup() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         guard let button = statusItem.button else { return }
 
-        // Use SF Symbol as the menu bar icon (template by default)
         let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Calendar Click")
         image?.isTemplate = true
         button.image = image
@@ -27,13 +32,8 @@ final class StatusItemController: NSObject {
         if event.type == .rightMouseUp {
             showContextMenu()
         } else {
-            performCopy()
+            onLeftClick?()
         }
-    }
-
-    private func performCopy() {
-        // TODO: Wire up full pipeline in Phase 7
-        print("copy triggered")
     }
 
     private func showContextMenu() {
@@ -60,7 +60,6 @@ final class StatusItemController: NSObject {
         let quitItem = NSMenuItem(title: "Quit Calendar Click", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
 
-        // Temporarily assign menu, trigger, then clear
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
@@ -69,18 +68,15 @@ final class StatusItemController: NSObject {
     // MARK: - Menu Actions
 
     @objc private func copyNextWeek() {
-        // TODO: Wire up in Phase 7
-        print("copy next week")
+        onRangeSelected?(.nextWeek)
     }
 
     @objc private func copyNextFortnight() {
-        // TODO: Wire up in Phase 7
-        print("copy next fortnight")
+        onRangeSelected?(.nextFortnight)
     }
 
     @objc private func copyNext30Days() {
-        // TODO: Wire up in Phase 7
-        print("copy next 30 days")
+        onRangeSelected?(.next30Days)
     }
 
     @objc private func openSettings() {
@@ -88,13 +84,11 @@ final class StatusItemController: NSObject {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // Observe window close to re-hide Dock icon
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: nil,
             queue: .main
-        ) { [weak self] notification in
-            guard self != nil else { return }
+        ) { _ in
             DispatchQueue.main.async {
                 NSApp.setActivationPolicy(.accessory)
             }
