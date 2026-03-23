@@ -1,0 +1,42 @@
+name: CalendarClick
+options:
+  bundleIdPrefix: com.calendarclick
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  minimumXcodeGenVersion: "2.40"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_IDENTITY: "-"
+    PRODUCT_BUNDLE_IDENTIFIER: com.calendarclick.CalendarClick
+
+targets:
+  CalendarClick:
+    type: application
+    platform: macOS
+    sources:
+      - CalendarClick
+    settings:
+      base:
+        INFOPLIST_FILE: CalendarClick/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CalendarClick/CalendarClick.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        COMBINE_HIDPI_IMAGES: YES
+
+  CalendarClickTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - CalendarClickTests
+    dependencies:
+      - target: CalendarClick
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CalendarClick.app/Contents/MacOS/CalendarClick"
