@@ -641,6 +641,84 @@ struct AppSettingsTests {
 }
 
 // ============================================================================
+// MARK: - Slot Rounding Tests
+// ============================================================================
+
+@Suite("Slot Rounding")
+struct SlotRoundingTests {
+    let service = AvailabilityService()
+
+    // MARK: - roundUp
+
+    @Test func roundUp_10_47am_to_11am_30minGranularity() {
+        let input = date(2026, 3, 25, 10, 47)
+        let result = service.roundUp(input, toMinutes: 30)
+        #expect(cal.component(.hour, from: result) == 11)
+        #expect(cal.component(.minute, from: result) == 0)
+    }
+
+    @Test func roundUp_alreadyOnBoundary_unchanged() {
+        let input = date(2026, 3, 25, 9, 0)
+        let result = service.roundUp(input, toMinutes: 30)
+        #expect(result == input)
+    }
+
+    @Test func roundUp_10_47am_to_10_50am_10minGranularity() {
+        let input = date(2026, 3, 25, 10, 47)
+        let result = service.roundUp(input, toMinutes: 10)
+        #expect(cal.component(.hour, from: result) == 10)
+        #expect(cal.component(.minute, from: result) == 50)
+    }
+
+    @Test func roundUp_granularityZero_unchanged() {
+        let input = date(2026, 3, 25, 10, 47)
+        let result = service.roundUp(input, toMinutes: 0)
+        #expect(result == input)
+    }
+
+    // MARK: - roundDown
+
+    @Test func roundDown_2_08pm_to_2pm_30minGranularity() {
+        let input = date(2026, 3, 25, 14, 8)
+        let result = service.roundDown(input, toMinutes: 30)
+        #expect(cal.component(.hour, from: result) == 14)
+        #expect(cal.component(.minute, from: result) == 0)
+    }
+
+    @Test func roundDown_alreadyOnBoundary_unchanged() {
+        let input = date(2026, 3, 25, 9, 0)
+        let result = service.roundDown(input, toMinutes: 30)
+        #expect(result == input)
+    }
+
+    @Test func roundDown_granularityZero_unchanged() {
+        let input = date(2026, 3, 25, 14, 8)
+        let result = service.roundDown(input, toMinutes: 0)
+        #expect(result == input)
+    }
+
+    // MARK: - Rounding Integration (slot becomes invalid after rounding)
+
+    @Test func slotDropped_whenRoundingMakesStartGteEnd() {
+        // Slot from 10:47 to 10:52 — with 30-min granularity, start rounds up to 11:00
+        // and end rounds down to 10:30, so start >= end → dropped
+        let start = date(2026, 3, 25, 10, 47)
+        let end = date(2026, 3, 25, 10, 52)
+        let roundedStart = service.roundUp(start, toMinutes: 30)
+        let roundedEnd = service.roundDown(end, toMinutes: 30)
+        #expect(roundedStart >= roundedEnd)
+    }
+
+    @Test func granularityOff_noRounding() {
+        // When granularity is 0, roundUp and roundDown return the input unchanged
+        let start = date(2026, 3, 25, 10, 47)
+        let end = date(2026, 3, 25, 14, 8)
+        #expect(service.roundUp(start, toMinutes: 0) == start)
+        #expect(service.roundDown(end, toMinutes: 0) == end)
+    }
+}
+
+// ============================================================================
 // MARK: - DateFromMinutes Helper Tests
 // ============================================================================
 
@@ -681,5 +759,136 @@ struct DateFromMinutesTests {
         let result = service.dateFromMinutes(1439, on: day)
         #expect(cal.component(.hour, from: result) == 23)
         #expect(cal.component(.minute, from: result) == 59)
+    }
+}
+
+// ============================================================================
+// MARK: - Markdown Format & Timezone Conversion Tests
+// ============================================================================
+
+@Suite("Markdown Format & Timezone")
+struct MarkdownFormatTests {
+    let formatter = AvailabilityFormatter()
+
+    // MARK: - Markdown Single Day
+
+    @Test func markdown_singleDay_bulletAndBoldHeader() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 30), slot(25, 14, 0, 15, 0)],
+        ]
+        let result = formatter.format(slots: slots, template: .markdown)
+        #expect(result == "- **Wed Mar 25:** 9-10:30am, 2-3pm")
+    }
+
+    // MARK: - Markdown Multiple Days
+
+    @Test func markdown_multipleDays_eachOnOwnBullet() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 27): [slot(27, 9, 0, 17, 0)],
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 30), slot(25, 14, 0, 15, 0)],
+            date(2026, 3, 26): [slot(26, 10, 0, 12, 0)],
+        ]
+        let result = formatter.format(slots: slots, template: .markdown)
+        let lines = result.split(separator: "\n").map(String.init)
+
+        #expect(lines.count == 3)
+        #expect(lines[0] == "- **Wed Mar 25:** 9-10:30am, 2-3pm")
+        #expect(lines[1] == "- **Thu Mar 26:** 10am-12pm")
+        #expect(lines[2] == "- **Fri Mar 27:** 9am-5pm")
+    }
+
+    // MARK: - Markdown With Timezone (timezone line NOT bulleted)
+
+    @Test func markdown_withTimezone_tzLineNotBulleted() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 0)],
+        ]
+        let result = formatter.format(slots: slots, showTimeZone: true, template: .markdown)
+        let lines = result.split(separator: "\n").map(String.init)
+
+        #expect(lines.count == 2)
+        #expect(lines[0].hasPrefix("- **"))
+        // Timezone line should NOT start with "- "
+        #expect(lines[1].hasPrefix("("))
+        #expect(lines[1].hasSuffix(")"))
+        #expect(lines[1].contains("GMT"))
+        #expect(!lines[1].hasPrefix("- "))
+    }
+
+    // MARK: - Plain Text Backward Compatible
+
+    @Test func plainText_defaultTemplate_unchanged() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 30), slot(25, 14, 0, 15, 0)],
+        ]
+        let result = formatter.format(slots: slots)
+        #expect(result == "Wed Mar 25: 9-10:30am, 2-3pm")
+    }
+
+    @Test func plainText_explicitTemplate_unchanged() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 27): [slot(27, 9, 0, 17, 0)],
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 30), slot(25, 14, 0, 15, 0)],
+            date(2026, 3, 26): [slot(26, 10, 0, 12, 0)],
+        ]
+        let result = formatter.format(slots: slots, template: .plainText)
+        let lines = result.split(separator: "\n").map(String.init)
+
+        #expect(lines.count == 3)
+        #expect(lines[0] == "Wed Mar 25: 9-10:30am, 2-3pm")
+        #expect(lines[1] == "Thu Mar 26: 10am-12pm")
+        #expect(lines[2] == "Fri Mar 27: 9am-5pm")
+    }
+
+    // MARK: - Timezone Conversion
+
+    @Test func timezoneConversion_timesChangeForDifferentTimezone() {
+        // Create slots at specific UTC times, then format with two different timezones.
+        // The displayed times should differ.
+        let utcCal: Calendar = {
+            var c = Calendar.current
+            c.timeZone = TimeZone(identifier: "UTC")!
+            return c
+        }()
+        // Create a slot at 14:00-15:00 UTC on Mar 25
+        let start = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 14, minute: 0))!
+        let end = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 15, minute: 0))!
+        let dayKey = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25))!
+        let slots: [Date: [TimeSlot]] = [
+            dayKey: [TimeSlot(start: start, end: end)],
+        ]
+
+        let utcResult = formatter.format(slots: slots, timezone: TimeZone(identifier: "UTC")!)
+        let estResult = formatter.format(slots: slots, timezone: TimeZone(identifier: "America/New_York")!)
+
+        // UTC shows 2-3pm, EST shows 10-11am (5 hours behind)
+        #expect(utcResult.contains("2-3pm"))
+        #expect(estResult.contains("10-11am"))
+    }
+
+    // MARK: - timezoneString(for:)
+
+    @Test func timezoneString_forSpecificTimezone_showsCorrectLabel() {
+        let utc = TimeZone(identifier: "UTC")!
+        let tz = AvailabilityFormatter.timezoneString(for: utc)
+        // UTC's abbreviation is "GMT" on Apple platforms
+        #expect(tz.contains("GMT"))
+        #expect(tz.contains("+0") || tz.contains("-0") || tz == "GMT, GMT+0")
+    }
+
+    @Test func timezoneString_forNil_showsLocalTimezone() {
+        // When nil, should match the system timezone behavior
+        let fromNil = AvailabilityFormatter.timezoneString(for: nil)
+        let fromCurrent = AvailabilityFormatter.timezoneString(for: TimeZone.current)
+        #expect(fromNil == fromCurrent)
+    }
+
+    @Test func timezoneString_forNonLocalTimezone_showsAbbreviationAndOffset() {
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        let tz = AvailabilityFormatter.timezoneString(for: tokyo)
+        #expect(tz.contains("GMT"))
+        #expect(tz.contains(", "))
+        // Tokyo is GMT+9
+        #expect(tz.contains("+9"))
     }
 }

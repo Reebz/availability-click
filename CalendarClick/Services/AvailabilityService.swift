@@ -54,7 +54,21 @@ struct AvailabilityService {
                 workEnd: workEnd
             )
 
-            let viable = freeSlots.filter { $0.duration >= minimumSlot }
+            // Round slot boundaries to configured granularity
+            let granularity = AppSettings.roundingGranularity
+            let roundedSlots: [TimeSlot]
+            if granularity > 0 {
+                roundedSlots = freeSlots.compactMap { slot in
+                    let roundedStart = roundUp(slot.start, toMinutes: granularity)
+                    let roundedEnd = roundDown(slot.end, toMinutes: granularity)
+                    guard roundedStart < roundedEnd else { return nil }
+                    return TimeSlot(start: roundedStart, end: roundedEnd)
+                }
+            } else {
+                roundedSlots = freeSlots
+            }
+
+            let viable = roundedSlots.filter { $0.duration >= minimumSlot }
             if !viable.isEmpty {
                 result[dayStart] = viable
             }
@@ -244,6 +258,29 @@ struct AvailabilityService {
         }
 
         return freeBlocks
+    }
+
+    // MARK: - Rounding
+
+    /// Rounds a date up to the next multiple of `minutes`. Returns the date unchanged if already on a boundary.
+    func roundUp(_ date: Date, toMinutes minutes: Int) -> Date {
+        guard minutes > 0 else { return date }
+        let comps = calendar.dateComponents([.minute], from: calendar.startOfDay(for: date), to: date)
+        let totalMinutes = comps.minute ?? 0
+        let remainder = totalMinutes % minutes
+        if remainder == 0 { return date }
+        let minutesToAdd = minutes - remainder
+        return calendar.date(byAdding: .minute, value: minutesToAdd, to: date)!
+    }
+
+    /// Rounds a date down to the previous multiple of `minutes`. Returns the date unchanged if already on a boundary.
+    func roundDown(_ date: Date, toMinutes minutes: Int) -> Date {
+        guard minutes > 0 else { return date }
+        let comps = calendar.dateComponents([.minute], from: calendar.startOfDay(for: date), to: date)
+        let totalMinutes = comps.minute ?? 0
+        let remainder = totalMinutes % minutes
+        if remainder == 0 { return date }
+        return calendar.date(byAdding: .minute, value: -remainder, to: date)!
     }
 
     // MARK: - Helpers

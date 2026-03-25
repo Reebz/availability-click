@@ -1,5 +1,10 @@
 import Foundation
 
+enum FormatTemplate {
+    case plainText
+    case markdown
+}
+
 struct AvailabilityFormatter {
     private let calendar = Calendar.current
     private let dateFormatter: DateFormatter = {
@@ -13,9 +18,20 @@ struct AvailabilityFormatter {
     /// Pure function — no side effects.
     func format(
         slots: [Date: [TimeSlot]],
-        showTimeZone: Bool = false
+        showTimeZone: Bool = false,
+        template: FormatTemplate = .plainText,
+        timezone: TimeZone? = nil
     ) -> String {
         guard !slots.isEmpty else { return "" }
+
+        let effectiveCalendar: Calendar
+        if let tz = timezone {
+            var cal = Calendar.current
+            cal.timeZone = tz
+            effectiveCalendar = cal
+        } else {
+            effectiveCalendar = calendar
+        }
 
         let sortedDays = slots.keys.sorted()
         var lines: [String] = []
@@ -24,12 +40,19 @@ struct AvailabilityFormatter {
             guard let daySlots = slots[day], !daySlots.isEmpty else { continue }
             let sortedSlots = daySlots.sorted { $0.start < $1.start }
             let dayLabel = dateFormatter.string(from: day)
-            let timeParts = sortedSlots.map { formatTimeRange($0) }
-            lines.append("\(dayLabel): \(timeParts.joined(separator: ", "))")
+            let timeParts = sortedSlots.map { formatTimeRange($0, using: effectiveCalendar) }
+            let timeList = timeParts.joined(separator: ", ")
+
+            switch template {
+            case .plainText:
+                lines.append("\(dayLabel): \(timeList)")
+            case .markdown:
+                lines.append("- **\(dayLabel):** \(timeList)")
+            }
         }
 
         if showTimeZone {
-            lines.append("(\(Self.timezoneString()))")
+            lines.append("(\(Self.timezoneString(for: timezone)))")
         }
 
         return lines.joined(separator: "\n")
@@ -38,10 +61,14 @@ struct AvailabilityFormatter {
     // MARK: - Time Range Formatting
 
     func formatTimeRange(_ slot: TimeSlot) -> String {
-        let startHour = calendar.component(.hour, from: slot.start)
-        let startMinute = calendar.component(.minute, from: slot.start)
-        let endHour = calendar.component(.hour, from: slot.end)
-        let endMinute = calendar.component(.minute, from: slot.end)
+        formatTimeRange(slot, using: calendar)
+    }
+
+    func formatTimeRange(_ slot: TimeSlot, using cal: Calendar) -> String {
+        let startHour = cal.component(.hour, from: slot.start)
+        let startMinute = cal.component(.minute, from: slot.start)
+        let endHour = cal.component(.hour, from: slot.end)
+        let endMinute = cal.component(.minute, from: slot.end)
 
         let startPeriod = period(for: startHour)
         let endPeriod = period(for: endHour)
@@ -77,9 +104,9 @@ struct AvailabilityFormatter {
         hour24 >= 12 ? "pm" : "am"
     }
 
-    /// Builds timezone string like "AEST, GMT+11" from the system timezone.
-    static func timezoneString() -> String {
-        let tz = TimeZone.current
+    /// Builds timezone string like "AEST, GMT+11" from the given timezone, or system timezone if nil.
+    static func timezoneString(for timezone: TimeZone? = nil) -> String {
+        let tz = timezone ?? TimeZone.current
         let abbrev = tz.abbreviation() ?? "UTC"
         let seconds = tz.secondsFromGMT()
         let hours = seconds / 3600
