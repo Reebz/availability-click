@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let calendarService = CalendarService.shared
     private let availabilityService = AvailabilityService()
     private let formatter = AvailabilityFormatter()
+    private var shortcutManager: GlobalShortcutManager!
+    private var shortcutObserver: NSObjectProtocol?
 
     /// Debounce: ignore clicks within 500ms of previous
     private var lastCopyTime: Date = .distantPast
@@ -22,11 +24,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItemController.setup()
 
+        // Set up global keyboard shortcut
+        shortcutManager = GlobalShortcutManager()
+        registerSavedShortcut()
+        observeShortcutChanges()
+
         // Request calendar access on first launch
         Task {
             if calendarService.authorizationStatus == .notDetermined {
                 _ = await calendarService.requestAccess()
             }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        shortcutManager.unregister()
+        if let observer = shortcutObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    // MARK: - Keyboard Shortcut
+
+    private func registerSavedShortcut() {
+        guard let saved = AppSettings.globalShortcut,
+              let keyCode = saved["keyCode"],
+              let modifiers = saved["modifiers"],
+              keyCode != 0 || modifiers != 0 else {
+            // No saved shortcut -- register default: Ctrl+Shift+C
+            shortcutManager.register(
+                keyCode: 8,
+                modifiers: [.control, .shift]
+            ) { [weak self] in
+                self?.copyDefault()
+            }
+            return
+        }
+
+        shortcutManager.register(
+            keyCode: UInt16(keyCode),
+            modifiers: NSEvent.ModifierFlags(rawValue: UInt(modifiers))
+        ) { [weak self] in
+            self?.copyDefault()
+        }
+    }
+
+    private func observeShortcutChanges() {
+        shortcutObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleShortcutChange()
+            }
+        }
+    }
+
+    private func handleShortcutChange() {
+        guard let saved = AppSettings.globalShortcut else {
+            shortcutManager.unregister()
+            return
+        }
+
+        guard let keyCode = saved["keyCode"],
+              let modifiers = saved["modifiers"] else {
+            shortcutManager.unregister()
+            return
+        }
+
+        // Empty dict means shortcut was cleared
+        if keyCode == 0 && modifiers == 0 {
+            shortcutManager.unregister()
+            return
+        }
+
+        shortcutManager.register(
+            keyCode: UInt16(keyCode),
+            modifiers: NSEvent.ModifierFlags(rawValue: UInt(modifiers))
+        ) { [weak self] in
+            self?.copyDefault()
         }
     }
 

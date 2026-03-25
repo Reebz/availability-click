@@ -29,6 +29,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
+                keyboardShortcutSection
                 workingHoursSection
                 workingDaysSection
                 defaultRangeSection
@@ -41,6 +42,17 @@ struct SettingsView: View {
         }
         .onChange(of: workingDays) { _, newValue in
             UserDefaults.standard.set(Array(newValue), forKey: AppSettings.workingDaysKey)
+        }
+    }
+
+    // MARK: - Keyboard Shortcut
+
+    private var keyboardShortcutSection: some View {
+        SettingsSection("Keyboard Shortcut") {
+            HStack {
+                ShortcutRecorderView()
+                Spacer()
+            }
         }
     }
 
