@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		05CE7DA6F7CDCAB69C2C0FE6 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0EBAC9D83EA59544534D5C8 /* CalendarService.swift */; };
 		073F657405C601866C63E15B /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342D2CE141D485A3218A7E6D /* AppSettings.swift */; };
+		255B093E91E2F69B9D6FEBD4 /* PreviewPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8100BFD2A7537AB34FE67B69 /* PreviewPopoverView.swift */; };
 		280162B393C8866CB4B0B635 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E810036C7D71C01D3540E5 /* AppDelegate.swift */; };
 		5BBDF3C337E0E0FC0B2F3D50 /* CalendarPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D585224DBBBE7B26F868BF57 /* CalendarPickerView.swift */; };
 		68A98F43B4C439376566687B /* CalendarClickApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26ABDB1066C4309D2B48E7C2 /* CalendarClickApp.swift */; };
@@ -16,9 +17,11 @@
 		AE00743E30284384BA41F594 /* AvailabilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E21CFFEA7E0A096229BF18 /* AvailabilityService.swift */; };
 		B9549658636CA6F61C5EB2C0 /* CalendarClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B3DEE1E13FE2CA0E77C8A7 /* CalendarClickTests.swift */; };
 		BA56874ED36B79C065C6BCD3 /* TimeSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D86233DA66F4E39D7F2BE5C /* TimeSlot.swift */; };
+		D7DA31E33DC4EEC38A2A241B /* GlobalShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACAAFD6B2D6ACDE1A9D808C5 /* GlobalShortcutManager.swift */; };
 		D8D4395FBA2A548C5F203D66 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DCCF573AA01917E0ED07748 /* SettingsView.swift */; };
 		DD6853404454FA903F88333B /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02E02991A6EA5FAC20B5E57B /* StatusItemController.swift */; };
 		DDAA959C7F31D98DB36AE828 /* AvailabilityFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778FF7CB28FDA4D0D04D5E7F /* AvailabilityFormatter.swift */; };
+		E3629CE40EB003B8D7A1B0E2 /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043313DD18BD899A120D585A /* ShortcutRecorderView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +36,7 @@
 
 /* Begin PBXFileReference section */
 		02E02991A6EA5FAC20B5E57B /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
+		043313DD18BD899A120D585A /* ShortcutRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderView.swift; sourceTree = "<group>"; };
 		22B3DEE1E13FE2CA0E77C8A7 /* CalendarClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarClickTests.swift; sourceTree = "<group>"; };
 		26ABDB1066C4309D2B48E7C2 /* CalendarClickApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarClickApp.swift; sourceTree = "<group>"; };
 		299FD86872A90C35262F2888 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -42,7 +46,9 @@
 		778FF7CB28FDA4D0D04D5E7F /* AvailabilityFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityFormatter.swift; sourceTree = "<group>"; };
 		7DCCF573AA01917E0ED07748 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7EDFF459D43AD42BD40AB7F6 /* CalendarClick.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CalendarClick.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8100BFD2A7537AB34FE67B69 /* PreviewPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPopoverView.swift; sourceTree = "<group>"; };
 		90172794F39C1693DA2FAAD4 /* CalendarClick.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CalendarClick.entitlements; sourceTree = "<group>"; };
+		ACAAFD6B2D6ACDE1A9D808C5 /* GlobalShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutManager.swift; sourceTree = "<group>"; };
 		C4E21CFFEA7E0A096229BF18 /* AvailabilityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityService.swift; sourceTree = "<group>"; };
 		D0EBAC9D83EA59544534D5C8 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		D41E303BD7040158F0D9A741 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -106,6 +112,7 @@
 		9692572A2BE27FFA30059A67 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				ACAAFD6B2D6ACDE1A9D808C5 /* GlobalShortcutManager.swift */,
 				02E02991A6EA5FAC20B5E57B /* StatusItemController.swift */,
 			);
 			path = Utilities;
@@ -124,7 +131,9 @@
 			isa = PBXGroup;
 			children = (
 				D585224DBBBE7B26F868BF57 /* CalendarPickerView.swift */,
+				8100BFD2A7537AB34FE67B69 /* PreviewPopoverView.swift */,
 				7DCCF573AA01917E0ED07748 /* SettingsView.swift */,
+				043313DD18BD899A120D585A /* ShortcutRecorderView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -230,7 +239,10 @@
 				68A98F43B4C439376566687B /* CalendarClickApp.swift in Sources */,
 				5BBDF3C337E0E0FC0B2F3D50 /* CalendarPickerView.swift in Sources */,
 				05CE7DA6F7CDCAB69C2C0FE6 /* CalendarService.swift in Sources */,
+				D7DA31E33DC4EEC38A2A241B /* GlobalShortcutManager.swift in Sources */,
+				255B093E91E2F69B9D6FEBD4 /* PreviewPopoverView.swift in Sources */,
 				D8D4395FBA2A548C5F203D66 /* SettingsView.swift in Sources */,
+				E3629CE40EB003B8D7A1B0E2 /* ShortcutRecorderView.swift in Sources */,
 				DD6853404454FA903F88333B /* StatusItemController.swift in Sources */,
 				BA56874ED36B79C065C6BCD3 /* TimeSlot.swift in Sources */,
 			);
