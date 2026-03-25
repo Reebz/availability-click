@@ -28,8 +28,8 @@ struct AvailabilityFormatter {
             lines.append("\(dayLabel): \(timeParts.joined(separator: ", "))")
         }
 
-        if showTimeZone, let tz = TimeZone.current.abbreviation() {
-            lines.append("(\(tz))")
+        if showTimeZone {
+            lines.append("(\(Self.timezoneString()))")
         }
 
         return lines.joined(separator: "\n")
@@ -75,5 +75,21 @@ struct AvailabilityFormatter {
     /// Returns "am" or "pm" for a 24-hour value. Hour 12-23 = pm, 0-11 = am.
     private func period(for hour24: Int) -> String {
         hour24 >= 12 ? "pm" : "am"
+    }
+
+    /// Builds timezone string like "AEST, GMT+11" from the system timezone.
+    static func timezoneString() -> String {
+        let tz = TimeZone.current
+        let abbrev = tz.abbreviation() ?? "UTC"
+        let seconds = tz.secondsFromGMT()
+        let hours = seconds / 3600
+        let minutes = abs(seconds / 60) % 60
+        let gmtOffset: String
+        if minutes == 0 {
+            gmtOffset = String(format: "GMT%+d", hours)
+        } else {
+            gmtOffset = String(format: "GMT%+d:%02d", hours, minutes)
+        }
+        return "\(abbrev), \(gmtOffset)"
     }
 }

@@ -27,15 +27,18 @@ struct SettingsView: View {
     @State private var workingDays: Set<Int> = Set(AppSettings.workingDays)
 
     var body: some View {
-        Form {
-            workingHoursSection
-            workingDaysSection
-            defaultRangeSection
-            todayBufferSection
-            CalendarPickerView()
-            optionsSection
+        ScrollView {
+            VStack(spacing: 0) {
+                workingHoursSection
+                workingDaysSection
+                defaultRangeSection
+                todayBufferSection
+                CalendarPickerView()
+                optionsSection
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .formStyle(.grouped)
         .onChange(of: workingDays) { _, newValue in
             UserDefaults.standard.set(Array(newValue), forKey: AppSettings.workingDaysKey)
         }
@@ -44,7 +47,7 @@ struct SettingsView: View {
     // MARK: - Working Hours
 
     private var workingHoursSection: some View {
-        Section("Working Hours") {
+        SettingsSection("Working Hours") {
             HStack {
                 Picker("From", selection: $workingHoursStart) {
                     ForEach(timeOptions, id: \.self) { minutes in
@@ -52,8 +55,10 @@ struct SettingsView: View {
                     }
                 }
                 .labelsHidden()
+                .frame(maxWidth: 140)
 
                 Text("to")
+                    .foregroundStyle(.secondary)
 
                 Picker("To", selection: $workingHoursEnd) {
                     ForEach(timeOptions.filter { $0 > workingHoursStart }, id: \.self) { minutes in
@@ -61,6 +66,9 @@ struct SettingsView: View {
                     }
                 }
                 .labelsHidden()
+                .frame(maxWidth: 140)
+
+                Spacer()
             }
         }
     }
@@ -68,8 +76,8 @@ struct SettingsView: View {
     // MARK: - Working Days
 
     private var workingDaysSection: some View {
-        Section("Working Days") {
-            HStack(spacing: 8) {
+        SettingsSection("Working Days") {
+            HStack(spacing: 6) {
                 ForEach(dayOptions, id: \.weekday) { option in
                     Toggle(option.label, isOn: Binding(
                         get: { workingDays.contains(option.weekday) },
@@ -82,7 +90,9 @@ struct SettingsView: View {
                         }
                     ))
                     .toggleStyle(.button)
+                    .controlSize(.small)
                 }
+                Spacer()
             }
         }
     }
@@ -90,28 +100,31 @@ struct SettingsView: View {
     // MARK: - Default Range
 
     private var defaultRangeSection: some View {
-        Section("Default Range") {
-            Picker("Mode", selection: $rangeMode) {
-                Text("This week (Mon-Fri)").tag("thisWeek")
-                Text("Next \(businessDays) business days").tag("businessDays")
-            }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
+        SettingsSection("Default Range") {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Mode", selection: $rangeMode) {
+                    Text("This week (Mon-Fri)").tag("thisWeek")
+                    Text("Next \(businessDays) business days").tag("businessDays")
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
 
-            if rangeMode == "businessDays" {
-                HStack {
-                    Text("Days:")
-                    Slider(
-                        value: Binding(
-                            get: { Double(businessDays) },
-                            set: { businessDays = Int($0) }
-                        ),
-                        in: 2...5,
-                        step: 1
-                    )
-                    Text("\(businessDays)")
-                        .monospacedDigit()
-                        .frame(width: 20)
+                if rangeMode == "businessDays" {
+                    HStack {
+                        Text("Days:")
+                            .foregroundStyle(.secondary)
+                        Slider(
+                            value: Binding(
+                                get: { Double(businessDays) },
+                                set: { businessDays = Int($0) }
+                            ),
+                            in: 2...5,
+                            step: 1
+                        )
+                        Text("\(businessDays)")
+                            .monospacedDigit()
+                            .frame(width: 20)
+                    }
                 }
             }
         }
@@ -120,7 +133,7 @@ struct SettingsView: View {
     // MARK: - Today Buffer
 
     private var todayBufferSection: some View {
-        Section("Today Buffer") {
+        SettingsSection("Today Buffer") {
             Picker("Minimum lead time", selection: $todayBufferMinutes) {
                 Text("None").tag(0)
                 Text("30 minutes").tag(30)
@@ -128,29 +141,47 @@ struct SettingsView: View {
                 Text("2 hours").tag(120)
                 Text("4 hours").tag(240)
             }
+            .frame(maxWidth: 200)
         }
     }
 
     // MARK: - Options
 
     private var optionsSection: some View {
-        Section {
-            Toggle(
-                "Append time zone (\(TimeZone.current.abbreviation() ?? "UTC"))",
-                isOn: $showTimeZone
-            )
+        SettingsSection("Options") {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(
+                    "Append time zone (\(timezoneLabel))",
+                    isOn: $showTimeZone
+                )
 
-            Toggle("Launch at login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, newValue in
-                    updateLoginItem(enabled: newValue)
-                }
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        updateLoginItem(enabled: newValue)
+                    }
+            }
         }
     }
 
     // MARK: - Helpers
 
+    private var timezoneLabel: String {
+        let tz = TimeZone.current
+        let abbrev = tz.abbreviation() ?? "UTC"
+        let seconds = tz.secondsFromGMT()
+        let hours = seconds / 3600
+        let minutes = abs(seconds / 60) % 60
+        let gmtOffset: String
+        if minutes == 0 {
+            gmtOffset = String(format: "GMT%+d", hours)
+        } else {
+            gmtOffset = String(format: "GMT%+d:%02d", hours, minutes)
+        }
+        return "\(abbrev), \(gmtOffset)"
+    }
+
     private var timeOptions: [Int] {
-        stride(from: 0, through: 1410, by: 30).map { $0 } // every 30 min
+        stride(from: 0, through: 1410, by: 30).map { $0 }
     }
 
     private var dayOptions: [(weekday: Int, label: String)] {
@@ -179,8 +210,33 @@ struct SettingsView: View {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            // If registration fails, revert the toggle
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
+    }
+}
+
+// MARK: - Section Component
+
+struct SettingsSection<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            content
+
+            Divider()
+                .padding(.top, 4)
+        }
+        .padding(.vertical, 6)
     }
 }
