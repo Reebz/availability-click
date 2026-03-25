@@ -1,8 +1,11 @@
 import AppKit
+import SwiftUI
 
+@MainActor
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem!
     private var animationTimer: Timer?
+    private var settingsWindow: NSWindow?
 
     /// Called when user left-clicks the icon
     var onLeftClick: (() -> Void)?
@@ -80,19 +83,38 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openSettings() {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // Reuse existing window if it's still around
+        if let window = settingsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
 
+        let hostingController = NSHostingController(rootView: SettingsView())
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Calendar Click Settings"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 420, height: 520))
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        // Observe close to re-hide Dock icon
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
-            object: nil,
+            object: window,
             queue: .main
-        ) { _ in
-            DispatchQueue.main.async {
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.settingsWindow = nil
                 NSApp.setActivationPolicy(.accessory)
             }
         }
+
+        self.settingsWindow = window
+
+        NSApp.setActivationPolicy(.regular)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Feedback Animation
@@ -108,7 +130,9 @@ final class StatusItemController: NSObject {
 
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
-            self?.statusItem.button?.image = originalImage
+            MainActor.assumeIsolated {
+                self?.statusItem.button?.image = originalImage
+            }
         }
     }
 }
