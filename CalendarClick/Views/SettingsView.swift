@@ -36,7 +36,6 @@ struct SettingsView: View {
             optionsSection
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 520)
         .onChange(of: workingDays) { _, newValue in
             UserDefaults.standard.set(Array(newValue), forKey: AppSettings.workingDaysKey)
         }

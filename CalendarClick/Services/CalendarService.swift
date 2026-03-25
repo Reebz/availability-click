@@ -21,8 +21,7 @@ final class CalendarService {
     // MARK: - Authorization
 
     var isAuthorized: Bool {
-        let status = EKEventStore.authorizationStatus(for: .event)
-        return status == .fullAccess || status == .authorized
+        EKEventStore.authorizationStatus(for: .event) == .fullAccess
     }
 
     var authorizationStatus: EKAuthorizationStatus {
@@ -60,19 +59,25 @@ final class CalendarService {
 
     // MARK: - Event Fetching
 
+    // EKEvent/EKEventStore aren't Sendable in Swift 6 but events(matching:) is
+    // documented as thread-safe for reads. Suppress the unavoidable warnings.
+    @preconcurrency
     func fetchEvents(from start: Date, to end: Date) async -> [EKEvent] {
         guard isAuthorized else { return [] }
 
         let calendars = selectedCalendars()
         guard !calendars.isEmpty else { return [] }
 
-        return await Task.detached(priority: .userInitiated) { [store] in
-            let predicate = store.predicateForEvents(
+        nonisolated(unsafe) let unsafeStore = store
+        nonisolated(unsafe) let unsafeCalendars = calendars
+
+        return await Task.detached(priority: .userInitiated) {
+            let predicate = unsafeStore.predicateForEvents(
                 withStart: start,
                 end: end,
-                calendars: calendars
+                calendars: unsafeCalendars
             )
-            return store.events(matching: predicate)
+            return unsafeStore.events(matching: predicate)
         }.value
     }
 
