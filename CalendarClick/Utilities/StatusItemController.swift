@@ -6,9 +6,13 @@ final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem!
     private var animationTimer: Timer?
     private var settingsWindow: NSWindow?
+    private var previewPopover: NSPopover?
 
     /// Called when user left-clicks the icon
     var onLeftClick: (() -> Void)?
+
+    /// Called when user Option+clicks the icon (preview mode)
+    var onOptionClick: (() -> Void)?
 
     /// Called when user selects a range from the right-click menu
     var onRangeSelected: ((DateRangeType) -> Void)?
@@ -38,6 +42,8 @@ final class StatusItemController: NSObject {
 
         if event.type == .rightMouseUp {
             showContextMenu()
+        } else if event.modifierFlags.contains(.option) {
+            onOptionClick?()
         } else {
             onLeftClick?()
         }
@@ -158,6 +164,41 @@ final class StatusItemController: NSObject {
                 frame.origin.x = screen.visibleFrame.maxX - frame.width
             }
             window.setFrame(frame, display: false)
+        }
+    }
+
+    // MARK: - Preview Popover
+
+    func showPreviewPopover(slots: [Date: [TimeSlot]]) {
+        // Dismiss existing popover
+        previewPopover?.close()
+
+        let popoverView = PreviewPopoverView(
+            slots: slots,
+            onCopy: { [weak self] text in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                self?.previewPopover?.close()
+                self?.previewPopover = nil
+                self?.flashConfirmation(success: true)
+            },
+            onDismiss: { [weak self] in
+                self?.previewPopover?.close()
+                self?.previewPopover = nil
+            }
+        )
+
+        let hostingController = NSHostingController(rootView: popoverView)
+
+        let popover = NSPopover()
+        popover.contentViewController = hostingController
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 380, height: 420)
+
+        self.previewPopover = popover
+
+        if let button = statusItem.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
 

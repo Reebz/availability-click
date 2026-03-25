@@ -24,6 +24,15 @@ struct SettingsView: View {
     @AppStorage(AppSettings.launchAtLoginKey)
     private var launchAtLogin = false
 
+    @AppStorage(AppSettings.roundingGranularityKey)
+    private var roundingGranularity = AppSettings.defaultRoundingGranularity
+
+    @AppStorage(AppSettings.minimumSlotMinutesKey)
+    private var minimumSlotMinutes = AppSettings.defaultMinimumSlot
+
+    @AppStorage(AppSettings.defaultFormatKey)
+    private var defaultFormat = AppSettings.defaultFormatValue
+
     @State private var workingDays: Set<Int> = Set(AppSettings.workingDays)
 
     var body: some View {
@@ -34,6 +43,9 @@ struct SettingsView: View {
                 workingDaysSection
                 defaultRangeSection
                 todayBufferSection
+                slotRoundingSection
+                minimumSlotSection
+                outputFormatSection
                 CalendarPickerView()
                 optionsSection
             }
@@ -154,6 +166,48 @@ struct SettingsView: View {
                 Text("4 hours").tag(240)
             }
             .frame(maxWidth: 200)
+        }
+    }
+
+    // MARK: - Slot Rounding
+
+    private var slotRoundingSection: some View {
+        SettingsSection("Slot Rounding") {
+            Picker("Round to nearest", selection: $roundingGranularity) {
+                Text("Off (exact times)").tag(0)
+                Text("5 minutes").tag(5)
+                Text("10 minutes").tag(10)
+                Text("15 minutes").tag(15)
+                Text("30 minutes").tag(30)
+            }
+            .frame(maxWidth: 220)
+        }
+    }
+
+    // MARK: - Minimum Slot Duration
+
+    private var minimumSlotSection: some View {
+        SettingsSection("Minimum Slot Duration") {
+            Picker("Hide slots shorter than", selection: $minimumSlotMinutes) {
+                Text("15 minutes").tag(15)
+                Text("30 minutes").tag(30)
+                Text("45 minutes").tag(45)
+                Text("1 hour").tag(60)
+            }
+            .frame(maxWidth: 200)
+        }
+    }
+
+    // MARK: - Output Format
+
+    private var outputFormatSection: some View {
+        SettingsSection("Output Format") {
+            Picker("Default format", selection: $defaultFormat) {
+                Text("Plain Text").tag("plainText")
+                Text("Markdown").tag("markdown")
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
         }
     }
 
