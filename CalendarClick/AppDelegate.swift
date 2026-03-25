@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.onRangeSelected = { [weak self] rangeType in
             self?.copyRange(rangeType)
         }
+        statusItemController.onOptionClick = { [weak self] in
+            self?.showPreview()
+        }
         statusItemController.setup()
 
         // Set up global keyboard shortcut
@@ -107,6 +110,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Preview
+
+    private func showPreview() {
+        guard calendarService.isAuthorized else {
+            showPermissionAlert()
+            return
+        }
+
+        let rangeType: DateRangeType
+        if AppSettings.defaultRangeMode == "thisWeek" {
+            rangeType = .thisWeek
+        } else {
+            rangeType = .businessDays(AppSettings.defaultBusinessDays)
+        }
+
+        Task { @MainActor in
+            let dateRange = calculateDateRange(for: rangeType)
+            let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
+
+            let slots = availabilityService.calculateAvailability(
+                events: events,
+                rangeType: rangeType
+            )
+
+            if slots.isEmpty {
+                statusItemController.flashConfirmation(success: false)
+            } else {
+                statusItemController.showPreviewPopover(slots: slots)
+            }
+        }
+    }
+
     // MARK: - Copy Pipeline
 
     private func copyDefault() {
@@ -144,9 +179,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if slots.isEmpty {
                 statusItemController.flashConfirmation(success: false)
             } else {
+                let template: FormatTemplate = AppSettings.defaultFormat == "markdown" ? .markdown : .plainText
                 let text = formatter.format(
                     slots: slots,
-                    showTimeZone: AppSettings.showTimeZone
+                    showTimeZone: AppSettings.showTimeZone,
+                    template: template
                 )
 
                 NSPasteboard.general.clearContents()
