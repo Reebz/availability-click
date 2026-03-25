@@ -6,20 +6,23 @@ struct CalendarPickerView: View {
     @State private var selectedIDs: Set<String> = Set(AppSettings.selectedCalendarIDs)
 
     var body: some View {
-        Section("Calendars") {
+        SettingsSection("Calendars Enabled") {
             if calendars.isEmpty {
                 Text("No calendars found. Add calendar accounts in System Settings.")
                     .foregroundStyle(.secondary)
                     .font(.callout)
             } else {
-                ForEach(calendars, id: \.calendarIdentifier) { calendar in
-                    Toggle(isOn: binding(for: calendar.calendarIdentifier)) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color(cgColor: calendar.cgColor))
-                                .frame(width: 10, height: 10)
-                            Text(calendar.title)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(calendars, id: \.calendarIdentifier) { calendar in
+                        Toggle(isOn: binding(for: calendar.calendarIdentifier)) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color(cgColor: calendar.cgColor))
+                                    .frame(width: 10, height: 10)
+                                Text(calendar.title)
+                            }
                         }
+                        .toggleStyle(.checkbox)
                     }
                 }
             }
@@ -35,11 +38,9 @@ struct CalendarPickerView: View {
     private func binding(for id: String) -> Binding<Bool> {
         Binding(
             get: {
-                // Empty selectedIDs means "all selected"
                 selectedIDs.isEmpty || selectedIDs.contains(id)
             },
             set: { isOn in
-                // If currently empty (all selected), initialize with all IDs
                 if selectedIDs.isEmpty {
                     selectedIDs = Set(calendars.map(\.calendarIdentifier))
                 }
@@ -50,7 +51,6 @@ struct CalendarPickerView: View {
                     selectedIDs.remove(id)
                 }
 
-                // If all are now selected, store empty (means "all")
                 let allIDs = Set(calendars.map(\.calendarIdentifier))
                 let toStore = selectedIDs == allIDs ? [String]() : Array(selectedIDs)
                 UserDefaults.standard.set(toStore, forKey: AppSettings.selectedCalendarIDsKey)

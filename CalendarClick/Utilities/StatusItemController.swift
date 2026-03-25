@@ -14,11 +14,15 @@ final class StatusItemController: NSObject {
     var onRangeSelected: ((DateRangeType) -> Void)?
 
     func setup() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // Use variable length so the icon area is slightly wider (easier to click)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         guard let button = statusItem.button else { return }
 
-        let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Calendar Click")
+        // ~20% larger than the default 16pt by using a point size config
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Calendar Click")?
+            .withSymbolConfiguration(config)
         image?.isTemplate = true
         button.image = image
 
@@ -90,13 +94,22 @@ final class StatusItemController: NSObject {
             return
         }
 
-        let hostingController = NSHostingController(rootView: SettingsView())
+        let settingsView = SettingsView()
+            .frame(minWidth: 380, minHeight: 400)
+        let hostingController = NSHostingController(rootView: settingsView)
+
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Calendar Click Settings"
-        window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 420, height: 520))
-        window.center()
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 420, height: 540))
+        window.minSize = NSSize(width: 380, height: 400)
         window.isReleasedWhenClosed = false
+
+        // Always on top
+        window.level = .floating
+
+        // Position underneath the menu bar icon
+        positionWindowUnderStatusItem(window)
 
         // Observe close to re-hide Dock icon
         NotificationCenter.default.addObserver(
@@ -117,11 +130,44 @@ final class StatusItemController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func positionWindowUnderStatusItem(_ window: NSWindow) {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else {
+            window.center()
+            return
+        }
+
+        // Get the status item's position in screen coordinates
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+
+        // Position window so its top-right aligns with the status item
+        let windowSize = window.frame.size
+        let x = screenRect.midX - windowSize.width / 2
+        let y = screenRect.minY - 4 // Small gap below menu bar
+
+        window.setFrameTopLeftPoint(NSPoint(x: x, y: y))
+
+        // Ensure the window stays on screen
+        if let screen = NSScreen.main {
+            var frame = window.frame
+            if frame.minX < screen.visibleFrame.minX {
+                frame.origin.x = screen.visibleFrame.minX
+            }
+            if frame.maxX > screen.visibleFrame.maxX {
+                frame.origin.x = screen.visibleFrame.maxX - frame.width
+            }
+            window.setFrame(frame, display: false)
+        }
+    }
+
     // MARK: - Feedback Animation
 
     func flashConfirmation(success: Bool) {
         let symbolName = success ? "checkmark.circle.fill" : "xmark.circle"
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
         image?.isTemplate = true
 
         let originalImage = statusItem.button?.image
