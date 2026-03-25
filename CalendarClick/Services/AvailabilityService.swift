@@ -209,7 +209,7 @@ struct AvailabilityService {
 
     // MARK: - Slot Subtraction
 
-    private func subtractEvents(
+    func subtractEvents(
         from freeBlock: TimeSlot,
         events: [TimeSlot],
         workStart: Date,
@@ -255,7 +255,7 @@ struct AvailabilityService {
             && event.endDate.timeIntervalSince(event.startDate) >= 86400
     }
 
-    private func dateFromMinutes(_ minutes: Int, on day: Date) -> Date {
+    func dateFromMinutes(_ minutes: Int, on day: Date) -> Date {
         let hour = minutes / 60
         let minute = minutes % 60
         return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)!
