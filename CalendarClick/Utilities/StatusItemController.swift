@@ -25,7 +25,7 @@ final class StatusItemController: NSObject {
 
         // ~20% larger than the default 16pt by using a point size config
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-        let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Calendar Click")?
+        let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Availability Click")?
             .withSymbolConfiguration(config)
         image?.isTemplate = true
         button.image = image
@@ -70,7 +70,7 @@ final class StatusItemController: NSObject {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let quitItem = NSMenuItem(title: "Quit Calendar Click", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Availability Click", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
 
         statusItem.menu = menu
@@ -105,7 +105,7 @@ final class StatusItemController: NSObject {
         let hostingController = NSHostingController(rootView: settingsView)
 
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Calendar Click Settings"
+        window.title = "Availability Click Settings"
         window.styleMask = [.titled, .closable, .resizable]
         window.setContentSize(NSSize(width: 420, height: 540))
         window.minSize = NSSize(width: 380, height: 400)
