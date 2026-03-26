@@ -240,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let alert = NSAlert()
         alert.messageText = "Calendar Access Required"
-        alert.informativeText = "Calendar Click needs access to your calendars to show availability. Please enable it in System Settings > Privacy & Security > Calendars."
+        alert.informativeText = "Availability Click needs access to your calendars to show availability. Please enable it in System Settings > Privacy & Security > Calendars."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Cancel")

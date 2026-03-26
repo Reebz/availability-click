@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Calendar Click</string>
+    <string>Availability Click</string>
     <key>CFBundleDisplayName</key>
-    <string>Calendar Click</string>
+    <string>Availability Click</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleVersion</key>
@@ -21,8 +21,8 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>Calendar Click reads your events to calculate your availability.</string>
+    <string>Availability Click reads your events to calculate your availability.</string>
     <key>NSCalendarsUsageDescription</key>
-    <string>Calendar Click reads your events to calculate your availability.</string>
+    <string>Availability Click reads your events to calculate your availability.</string>
 </dict>
 </plist>

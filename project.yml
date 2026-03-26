@@ -1,6 +1,6 @@
 name: CalendarClick
 options:
-  bundleIdPrefix: com.calendarclick
+  bundleIdPrefix: com.availabilityclick
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -12,7 +12,7 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_IDENTITY: "-"
-    PRODUCT_BUNDLE_IDENTIFIER: com.calendarclick.CalendarClick
+    PRODUCT_BUNDLE_IDENTIFIER: com.availabilityclick.AvailabilityClick
 
 targets:
   CalendarClick:
