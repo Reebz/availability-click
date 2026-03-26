@@ -1,7 +1,7 @@
 
 # <img src="site/images/app-icon.png" width="80" height="80"> Availability Click
 
-Share your calendar availability in one click. A macOS menu bar app that reads your calendars and copies formatted free slots to paste into any email or chat.
+A macOS menu bar app that reads your calendars and copies your availability to paste into an email or chat. One click.
 
 [Download the app](https://github.com/Reebz/availability-click/releases)
 
@@ -13,108 +13,84 @@ Thu Apr 2: 1-3:30pm
 Fri Apr 3: 9-11am, 3-5pm
 ```
 
-## Why this exists
+## Why I built this
 
-Calendly feels too impersonal for certain meetings. Typing out your availability by hand is tedious and error-prone. This sits in between -- effortless but still feels like you wrote it yourself.
+I was typing "I'm free Tuesday 2-4 and Wednesday morning" into emails multiple times a day. Sometimes I'd get it wrong - a meeting I forgot about, a timezone I miscalculated - and the back-and-forth would start. My calendar already knew the answer. I just needed a way to get it out quickly.
 
-I found myself manually typing "I'm free Tuesday 2-4 and Wednesday morning" into emails multiple times a day. That's a copy-paste problem, and the calendar already has the answer. So I built a button that does the work.
+Calendly solves this, but sending someone a scheduling link feels transactional. For the kinds of meetings I take - leadership syncs, cross-team alignment, exec conversations - I'd rather it feel like I wrote it myself. Because I did decide to send it. The app just did the typing.
 
-No links for your counterpart to click. No accounts for them to create. No bots. Just a clean message that reads like a human wrote it -- because the human decided to send it.
+No links for your counterpart to click. No accounts for them to create. A clean message that lands in their inbox looking like you took 30 seconds to check your calendar and type it out.
 
+## Installation
 
-# Installation
-
-### Download
-
-[Download here](https://github.com/Reebz/availability-click/releases). Open the app and grant calendar access. That's it.
+[Download here](https://github.com/Reebz/availability-click/releases). Open the app, grant calendar access, done.
 
 Requires macOS 14 (Sonoma) or later.
 
-> Apple may give a warning about opening a downloaded app. To launch, right-click and select Open.
+> Apple may warn you about opening a downloaded app. Right-click and select Open to get past it.
 
-
-## How to Use
+## How to use
 
 1. Launch Availability Click from Applications
 2. Grant calendar access when prompted
-3. Left-click the calendar icon in the menu bar -- your availability is copied to the clipboard
-4. Cmd+V into any email, Slack message, or chat
+3. Left-click the calendar icon in your menu bar - availability copied to clipboard
+4. Cmd+V into whatever you're writing.
 
-Right-click the menu bar icon for extended date ranges, Settings, and Quit.
+Right-click the menu bar icon for longer date ranges, Settings, and Quit.
 
+## What it does
 
-# Features
+**The basics**
+- Left-click copies your availability for the default range
+- Right-click gives you Next week, Next fortnight, or Next 30 days
+- Option+click opens a preview so you can check the output before copying
+- Ctrl+Shift+C copies from anywhere without touching the mouse (configurable)
+- Reads every calendar synced to your Mac - iCloud, Google, Outlook, Exchange
 
-- One click to copy -- or use the keyboard shortcut (Ctrl+Shift+C)
-- Reads all calendars synced to your Mac (iCloud, Google, Outlook, Exchange)
-- Smart time formatting -- "9-10:30am" not "9:00am-10:30am"
-- Privacy-first -- no accounts, no network access, no analytics
-
-**Menu Bar**
-- Left-click copies availability for your default range
-- Right-click for Next week, Next fortnight, Next 30 days
-- Option+click opens a preview popover before copying
-- Checkmark flash confirms the copy; X-mark if no slots found
-
-**Settings**
-- Working hours with 30-minute granularity (e.g., 8:30am-5pm)
-- Working days (any combination, not just Mon-Fri)
-- Default range: "This week" or "Next 2-5 business days" (slider)
-- Today buffer: minimum lead time before showing a slot (30 min to 4 hours)
-- Calendar selection: choose which calendars count as "busy"
-- Slot rounding: snap times to clean 5/10/15/30-minute boundaries
-- Minimum slot duration: hide gaps shorter than 15/30/45/60 minutes
-- Output format: Plain text or Markdown
-- Time zone toggle with GMT offset
-- Keyboard shortcut: configurable global hotkey
-- Launch at login
-
-**Preview Popover (Option+click)**
-- See your formatted availability before it hits the clipboard
-- Timezone picker with search -- convert times to your recipient's local time
-- Format toggle -- switch between plain text and Markdown
-- Copy button sends the displayed text to the clipboard
-
-**Smart Filtering**
+**Smart about what counts as "busy"**
 - Declined meetings don't block your time
 - Cancelled events are excluded
-- Events marked "free" (focus time, etc.) are excluded
+- Events you've marked as "free" (focus time blocks, etc.) are excluded
 - All-day events don't block time slots
-- "This week" auto-rolls to next week on Friday evening and weekends
+- If you click on a Friday evening or weekend, it rolls forward to next week automatically
 
+**Configurable**
+- Working hours with 30-minute granularity (8:30am start, not just 9am)
+- Working days - any combination, not just Mon through Fri
+- Default range: "This week" or "Next 2-5 business days" with a slider
+- Today buffer: minimum lead time before showing a slot (30 minutes to four hours)
+- Calendar selection: pick which calendars count as "busy"
+- Slot rounding: snap times to clean 5, 10, 15, or 30-minute boundaries
+- Minimum slot duration: hide gaps shorter than 15, 30, 45, or 60 minutes
+- Output format: plain text or Markdown
+- Time zone with GMT offset
 
-## Privacy Policy
+**Preview popover (Option+click)**
+- See the formatted text before it hits the clipboard
+- Timezone picker with search - convert to your recipient's local time before copying
+- Format toggle - switch between plain text and Markdown
+- Copy button puts exactly what you see on the clipboard.
 
-Availability Click does not collect, store, or transmit personal data.
+## Privacy
 
-The app:
-- Does not include analytics
-- Does not include tracking
-- Does not make any network connections
-- Does not share data with third parties
-- Does not store user data on external servers
+No analytics. No tracking. No network connections. No data collection.
 
-All calendar data is read locally via Apple's EventKit framework and never leaves your Mac. The app runs inside the macOS App Sandbox with calendar access as the only entitlement -- no network permissions are granted.
+The app reads your calendar locally through Apple's EventKit framework. Nothing leaves your Mac. It runs inside the macOS App Sandbox with calendar access as the only entitlement - network permissions aren't even granted. There is physically no way for it to phone home.
 
-No data is retained by the developer.
+## Technical details
 
-
-## Technical Details
-
-- **Language:** Swift 6
-- **Frameworks:** SwiftUI, AppKit, EventKit, Combine, ServiceManagement
-- **Dependencies:** Zero third-party dependencies
-- **Build tool:** XcodeGen
-- **Deployment target:** macOS 14.0 (Sonoma)
-- **Tests:** 89 tests across 8 suites (Apple Testing framework)
-- **Security:** App Sandbox, Hardened Runtime, Developer ID signed
-
+- Swift 6, SwiftUI + AppKit
+- EventKit, Combine, ServiceManagement
+- Zero third-party dependencies
+- XcodeGen for project generation
+- macOS 14.0+ (Sonoma)
+- 89 tests across eight suites
+- App Sandbox, Hardened Runtime, Developer ID signed
 
 ## Support
 
-If you find Availability Click useful, consider [buying me a coffee](https://buymeacoffee.com/reebz).<br>
+If this saves you time, consider [buying me a coffee](https://buymeacoffee.com/reebz).<br>
 <a href="https://www.buymeacoffee.com/reebz" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
-
 
 ## License
 
