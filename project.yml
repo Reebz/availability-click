@@ -1,4 +1,4 @@
-name: CalendarClick
+name: AvailabilityClick
 options:
   bundleIdPrefix: com.availabilityclick
   deploymentTarget:
@@ -13,30 +13,32 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_IDENTITY: "-"
     PRODUCT_BUNDLE_IDENTIFIER: com.availabilityclick.AvailabilityClick
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
 
 targets:
-  CalendarClick:
+  AvailabilityClick:
     type: application
     platform: macOS
     sources:
-      - CalendarClick
+      - AvailabilityClick
     settings:
       base:
-        INFOPLIST_FILE: CalendarClick/Info.plist
-        CODE_SIGN_ENTITLEMENTS: CalendarClick/CalendarClick.entitlements
+        INFOPLIST_FILE: AvailabilityClick/Info.plist
+        CODE_SIGN_ENTITLEMENTS: AvailabilityClick/AvailabilityClick.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         COMBINE_HIDPI_IMAGES: YES
 
-  CalendarClickTests:
+  AvailabilityClickTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - CalendarClickTests
+      - AvailabilityClickTests
     dependencies:
-      - target: CalendarClick
+      - target: AvailabilityClick
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CalendarClick.app/Contents/MacOS/CalendarClick"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AvailabilityClick.app/Contents/MacOS/AvailabilityClick"
