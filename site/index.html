@@ -9,13 +9,13 @@
   <link rel="apple-touch-icon" href="images/app-icon.png">
   <meta property="og:title" content="Availability Click - Share your calendar availability in one click">
   <meta property="og:description" content="A macOS menu bar app that reads your calendars and copies your availability to paste into any email or chat. No Calendly links. Just human.">
-  <meta property="og:image" content="https://reebz.github.io/availability-click/images/app-icon.png">
-  <meta property="og:url" content="https://reebz.github.io/availability-click">
+  <meta property="og:image" content="https://availabilityclick.com/images/app-icon.png">
+  <meta property="og:url" content="https://availabilityclick.com">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Availability Click - Share your calendar availability in one click">
   <meta name="twitter:description" content="A macOS menu bar app that reads your calendars and copies your availability to paste into any email or chat. No Calendly links. Just human.">
-  <meta name="twitter:image" content="https://reebz.github.io/availability-click/images/app-icon.png">
+  <meta name="twitter:image" content="https://availabilityclick.com/images/app-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -328,9 +328,9 @@
 
     .install-options {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, 1fr);
       gap: 20px;
-      max-width: 440px;
+      max-width: 760px;
       margin: 0 auto;
     }
 
@@ -354,6 +354,19 @@
       color: var(--text-muted);
       font-weight: 500;
       margin-bottom: 16px;
+    }
+
+    .brew-cmd {
+      background: var(--code-bg);
+      color: var(--code-text);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      text-align: left;
+      overflow-x: auto;
+      user-select: all;
     }
 
     /* ---- Footer ---- */
@@ -423,6 +436,7 @@
       .how-it-works { padding: 40px 0; }
       .steps { grid-template-columns: 1fr; gap: 20px; }
       .install { padding: 40px 0; }
+      .install-options { grid-template-columns: 1fr; max-width: 440px; }
       .install-card { padding: 22px; }
       .footer { padding: 32px 0; }
     }
@@ -437,7 +451,7 @@
       <h1>Availability Click</h1>
       <p class="tagline">Your calendar already knows when you're free. This puts it on the clipboard in one click so you can paste it into an email and move on.</p>
       <div class="hero-actions">
-        <a href="https://github.com/Reebz/availability-click/releases" class="btn btn-primary">
+        <a href="https://github.com/Reebz/availability-click/releases/download/v1.0.0/availability-click_v1.0.0.dmg" class="btn btn-primary">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Download for macOS
         </a>
@@ -542,10 +556,15 @@
         <div class="install-card">
           <h3>Download for macOS</h3>
           <p>Requires macOS 14 (Sonoma) or later. Open the app, grant calendar access, and you're done.</p>
-          <a href="https://github.com/Reebz/availability-click/releases" class="btn btn-primary" style="width: 100%; justify-content: center;">
+          <a href="https://github.com/Reebz/availability-click/releases/download/v1.0.0/availability-click_v1.0.0.dmg" class="btn btn-primary" style="width: 100%; justify-content: center;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download from GitHub
           </a>
+        </div>
+        <div class="install-card">
+          <h3>Homebrew</h3>
+          <p>Prefer the terminal? Install and update from the tap.</p>
+          <div class="brew-cmd">brew install --cask Reebz/availability-click/availability-click</div>
         </div>
       </div>
     </div>
