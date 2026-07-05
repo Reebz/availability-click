@@ -20,7 +20,28 @@ Package.resolved
 .LSOverride
 ._*
 
-# Environment
-.env*.local
-CalendarClick.xcodeproj/xcuserdata/
-CalendarClick.xcodeproj/project.xcworkspace/xcuserdata/
+# Build scratch and distribution
+dist/
+
+# AI tooling and local docs (never committed to the public repo)
+docs/
+todos/
+.claude/
+.serena/
+.impeccable/
+mempalace.yaml
+CLAUDE.md
+AGENTS.md
+
+# Release signing config (credentials live only in the Keychain profile)
+scripts/release.local
+
+# Secrets and signing materials
+*.p12
+*.cer
+*.pem
+*.key
+*.pfx
+*.mobileprovision
+*.keychain*
+.env*
