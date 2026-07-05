@@ -167,25 +167,40 @@ mkdir -p "$DOWNLOADS_DIR"
 cp "$DMG_PATH" "$DOWNLOADS_DIR/$DMG_NAME"
 (cd "$REPO_ROOT" && git add "downloads/$DMG_NAME")
 
-echo "==> Updating Homebrew cask checksum..."
+# The release artifact is complete: signed, notarized, stapled, and in downloads/.
+# Record success now, BEFORE the best-effort tap update, so a good build always
+# leaves the done-signal even if the Homebrew push later fails.
 DMG_SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+SENTINEL="$BUILD_DIR/RELEASE_COMPLETE_v$VERSION"
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SENTINEL"
+
+echo "==> Updating Homebrew cask checksum..."
 CASK_FILE="$(brew --repo Reebz/availability-click)/Casks/availability-click.rb"
 if [ -f "$CASK_FILE" ]; then
-  sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$CASK_FILE"
-  sed -i '' "s/sha256 \".*\"/sha256 \"$DMG_SHA256\"/" "$CASK_FILE"
-  (cd "$(dirname "$CASK_FILE")/.." && \
-    git add Casks/availability-click.rb && \
-    git commit -m "update availability-click to v$VERSION" && \
-    git push origin main)
-  echo "    Cask updated: $DMG_SHA256"
+  # Best-effort: a failed cask bump or push must NOT fail the release. The DMG is
+  # already built, notarized, stapled, and copied to downloads/. `git push origin
+  # HEAD` targets the tap's actual default branch (main or master); the commit is
+  # guarded so an unchanged cask does not abort with "nothing to commit". On any
+  # failure, warn and let the release finish — the tap can be updated by hand.
+  if (
+    set -e
+    sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$CASK_FILE"
+    sed -i '' "s/sha256 \".*\"/sha256 \"$DMG_SHA256\"/" "$CASK_FILE"
+    cd "$(dirname "$CASK_FILE")/.."
+    git add Casks/availability-click.rb
+    git diff --cached --quiet || git commit -m "update availability-click to v$VERSION"
+    git push origin HEAD
+  ); then
+    echo "    Cask updated and pushed: $DMG_SHA256"
+  else
+    echo "    WARNING: cask bump/push failed. Update the tap by hand."
+    echo "    version: $VERSION   sha256: $DMG_SHA256"
+  fi
 else
   echo "    WARNING: Cask file not found at $CASK_FILE"
   echo "    Tap the cask repo first (brew tap Reebz/availability-click),"
   echo "    or manually update sha256 to: $DMG_SHA256"
 fi
-
-SENTINEL="$BUILD_DIR/RELEASE_COMPLETE_v$VERSION"
-date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SENTINEL"
 
 echo ""
 echo "=== Release complete ==="
