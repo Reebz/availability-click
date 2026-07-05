@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import CalendarClick
+@testable import AvailabilityClick
 
 // MARK: - Test Helpers
 
