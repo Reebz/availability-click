@@ -3,7 +3,7 @@
 
 A macOS menu bar app that reads your calendars and copies your availability to paste into an email or chat. One click.
 
-[Download the app](https://github.com/Reebz/availability-click/releases)
+[Download the app](https://github.com/Reebz/availability-click/releases/download/v1.0.0/availability-click_v1.0.0.dmg), or install with Homebrew: `brew install --cask Reebz/availability-click/availability-click`.
 
 ```
 Mon Mar 30: 9-10:30am, 2-4pm
@@ -23,11 +23,17 @@ No links for your counterpart to click. No accounts for them to create. A clean 
 
 ## Installation
 
-[Download here](https://github.com/Reebz/availability-click/releases). Open the app, grant calendar access, done.
+**Homebrew**
 
-Requires macOS 14 (Sonoma) or later.
+```
+brew install --cask Reebz/availability-click/availability-click
+```
 
-> Apple may warn you about opening a downloaded app. Right-click and select Open to get past it.
+**Or download the DMG**
+
+[Download the latest release](https://github.com/Reebz/availability-click/releases/download/v1.0.0/availability-click_v1.0.0.dmg), open it, and drag Availability Click to your Applications folder. Grant calendar access on first launch.
+
+Requires macOS 14 (Sonoma) or later. The app is signed with a Developer ID and notarized by Apple, so it opens without a security warning.
 
 ## How to use
 
@@ -85,7 +91,7 @@ The app reads your calendar locally through Apple's EventKit framework. Nothing 
 - XcodeGen for project generation
 - macOS 14.0+ (Sonoma)
 - 89 tests across eight suites
-- App Sandbox, Hardened Runtime, Developer ID signed
+- App Sandbox, Hardened Runtime, Developer ID signed and notarized
 
 ## Support
 
