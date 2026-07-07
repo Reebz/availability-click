@@ -31,6 +31,9 @@ struct SettingsView: View {
     @AppStorage(AppSettings.minimumSlotMinutesKey)
     private var minimumSlotMinutes = AppSettings.defaultMinimumSlot
 
+    @AppStorage(AppSettings.defaultFormatKey)
+    private var defaultFormat = AppSettings.defaultFormatValue
+
     @State private var workingDays: Set<Int> = Set(AppSettings.workingDays)
 
     var body: some View {
@@ -44,6 +47,7 @@ struct SettingsView: View {
                 slotRoundingSection
                 minimumSlotSection
                 CalendarPickerView()
+                outputFormatSection
             }
             .padding(.horizontal, 20)
             .padding(.top, 36)
@@ -188,11 +192,34 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Output Format
+
+    private var outputFormatSection: some View {
+        SettingsSection("Output Format") {
+            Picker("Default format", selection: $defaultFormat) {
+                Text("Plain Text").tag("plainText")
+                Text("Markdown").tag("markdown")
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+        }
+    }
+
     // MARK: - Options
 
     private var optionsSection: some View {
         SettingsSection("Options") {
             VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Keyboard Shortcut")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    HStack {
+                        ShortcutRecorderView()
+                        Spacer()
+                    }
+                }
+
                 Toggle(
                     "Append time zone (\(timezoneLabel))",
                     isOn: $showTimeZone
