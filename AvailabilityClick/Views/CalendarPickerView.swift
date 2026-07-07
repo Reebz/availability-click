@@ -12,14 +12,23 @@ struct CalendarPickerView: View {
                     .foregroundStyle(.secondary)
                     .font(.callout)
             } else {
-                VStack(alignment: .leading, spacing: 6) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), alignment: .topLeading),
+                        GridItem(.flexible(), alignment: .topLeading),
+                    ],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
                     ForEach(calendars, id: \.calendarIdentifier) { calendar in
                         Toggle(isOn: binding(for: calendar.calendarIdentifier)) {
-                            HStack(spacing: 6) {
+                            HStack(alignment: .top, spacing: 6) {
                                 Circle()
                                     .fill(Color(cgColor: calendar.cgColor))
                                     .frame(width: 10, height: 10)
+                                    .padding(.top, 4)
                                 Text(calendar.title)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         .toggleStyle(.checkbox)

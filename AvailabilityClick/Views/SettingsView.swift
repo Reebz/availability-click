@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import EventKit
 import ServiceManagement
 
@@ -30,41 +31,30 @@ struct SettingsView: View {
     @AppStorage(AppSettings.minimumSlotMinutesKey)
     private var minimumSlotMinutes = AppSettings.defaultMinimumSlot
 
-    @AppStorage(AppSettings.defaultFormatKey)
-    private var defaultFormat = AppSettings.defaultFormatValue
-
     @State private var workingDays: Set<Int> = Set(AppSettings.workingDays)
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                keyboardShortcutSection
+            VStack(spacing: 12) {
+                optionsSection
                 workingHoursSection
                 workingDaysSection
                 defaultRangeSection
                 todayBufferSection
                 slotRoundingSection
                 minimumSlotSection
-                outputFormatSection
                 CalendarPickerView()
-                optionsSection
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.top, 36)
+            .padding(.bottom, 18)
         }
+        .background(
+            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+                .ignoresSafeArea()
+        )
         .onChange(of: workingDays) { _, newValue in
             UserDefaults.standard.set(Array(newValue), forKey: AppSettings.workingDaysKey)
-        }
-    }
-
-    // MARK: - Keyboard Shortcut
-
-    private var keyboardShortcutSection: some View {
-        SettingsSection("Keyboard Shortcut") {
-            HStack {
-                ShortcutRecorderView()
-                Spacer()
-            }
         }
     }
 
@@ -142,7 +132,7 @@ struct SettingsView: View {
                                 get: { Double(businessDays) },
                                 set: { businessDays = Int($0) }
                             ),
-                            in: 2...5,
+                            in: 2...30,
                             step: 1
                         )
                         Text("\(businessDays)")
@@ -194,20 +184,7 @@ struct SettingsView: View {
                 Text("45 minutes").tag(45)
                 Text("1 hour").tag(60)
             }
-            .frame(maxWidth: 200)
-        }
-    }
-
-    // MARK: - Output Format
-
-    private var outputFormatSection: some View {
-        SettingsSection("Output Format") {
-            Picker("Default format", selection: $defaultFormat) {
-                Text("Plain Text").tag("plainText")
-                Text("Markdown").tag("markdown")
-            }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
+            .fixedSize()
         }
     }
 
@@ -215,7 +192,7 @@ struct SettingsView: View {
 
     private var optionsSection: some View {
         SettingsSection("Options") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 Toggle(
                     "Append time zone (\(timezoneLabel))",
                     isOn: $showTimeZone
@@ -293,16 +270,43 @@ struct SettingsSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.headline)
                 .foregroundStyle(.primary)
 
             content
-
-            Divider()
-                .padding(.top, 4)
         }
-        .padding(.vertical, 6)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Vibrancy Background
+
+struct VisualEffectView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .underWindowBackground
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+        nsView.state = .active
     }
 }

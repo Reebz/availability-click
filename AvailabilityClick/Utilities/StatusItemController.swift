@@ -101,14 +101,19 @@ final class StatusItemController: NSObject {
         }
 
         let settingsView = SettingsView()
-            .frame(minWidth: 380, minHeight: 400)
+            .frame(minWidth: 456, minHeight: 500)
         let hostingController = NSHostingController(rootView: settingsView)
 
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Availability Click Settings"
-        window.styleMask = [.titled, .closable, .resizable]
-        window.setContentSize(NSSize(width: 420, height: 540))
-        window.minSize = NSSize(width: 380, height: 400)
+        window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.setContentSize(NSSize(width: 504, height: 675))
+        window.minSize = NSSize(width: 456, height: 500)
         window.isReleasedWhenClosed = false
 
         // Always on top
