@@ -263,6 +263,42 @@
       line-height: 1.55;
     }
 
+    /* ---- Screenshot ---- */
+    .screenshot {
+      padding: 64px 0;
+      background: var(--bg-alt);
+    }
+
+    .screenshot h2 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .screenshot .subtitle {
+      color: var(--text-muted);
+      font-weight: 500;
+      text-align: center;
+      margin-bottom: 40px;
+      font-size: 1.05rem;
+    }
+
+    .screenshot-frame {
+      max-width: 400px;
+      margin: 0 auto;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .screenshot-frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
     /* ---- How It Works ---- */
     .how-it-works {
       padding: 64px 0;
@@ -423,6 +459,8 @@
     @media (max-width: 768px) {
       .features { padding: 48px 0; }
       .how-it-works { padding: 48px 0; }
+      .screenshot { padding: 48px 0; }
+      .screenshot-frame { max-width: 320px; }
       .install { padding: 48px 0; }
     }
 
@@ -528,6 +566,17 @@
           <h3>Nothing leaves your Mac</h3>
           <p>No accounts, no network access, no analytics, no tracking. The app runs inside macOS App Sandbox with zero internet permissions. There is physically no way for it to phone home.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screenshot -->
+  <section class="screenshot">
+    <div class="container">
+      <h2>Set your hours and defaults</h2>
+      <p class="subtitle">Working hours, working days, default range, and which calendars count &mdash; all in one panel.</p>
+      <div class="screenshot-frame">
+        <img src="images/settings.png" alt="Availability Click settings window showing working hours, working days, default range, and enabled calendars" width="1068" height="2004" loading="lazy">
       </div>
     </div>
   </section>
