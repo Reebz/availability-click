@@ -222,10 +222,13 @@ struct AvailabilityFormatter {
         hour24 >= 12 ? "pm" : "am"
     }
 
-    /// Builds timezone string like "AEST, GMT+11" from the given timezone, or system timezone if nil.
+    /// Builds a timezone label like "Germany Time, GMT+2" (R3): a
+    /// human-readable zone name plus exactly one GMT offset. The old code used
+    /// `abbreviation()`, which returns the offset form ("GMT+2") for most
+    /// zones and rendered a duplicated "(GMT+2, GMT+2)". The name now comes
+    /// from `localizedZoneName` (KTD8); the offset is appended once.
     static func timezoneString(for timezone: TimeZone? = nil) -> String {
         let tz = timezone ?? TimeZone.current
-        let abbrev = tz.abbreviation() ?? "UTC"
         let seconds = tz.secondsFromGMT()
         let hours = seconds / 3600
         let minutes = abs(seconds / 60) % 60
@@ -235,6 +238,23 @@ struct AvailabilityFormatter {
         } else {
             gmtOffset = String(format: "GMT%+d:%02d", hours, minutes)
         }
-        return "\(abbrev), \(gmtOffset)"
+        return "\(localizedZoneName(for: tz)), \(gmtOffset)"
+    }
+
+    /// The human-readable half of `timezoneString` (KTD8 fallback chain).
+    /// `.shortGeneric` gives names like "Germany Time"/"India Time"; a NIL
+    /// locale silently returns the GMT-offset form instead (verified), so the
+    /// locale is always explicit. `.shortGeneric` can be nil for some
+    /// zone/locale pairs (e.g. bare fixed-offset zones), so it falls through
+    /// `.generic` and finally `abbreviation()`. Internal so tests exercise the
+    /// chain directly.
+    static func localizedZoneName(for tz: TimeZone) -> String {
+        if let short = tz.localizedName(for: .shortGeneric, locale: .current), !short.isEmpty {
+            return short
+        }
+        if let generic = tz.localizedName(for: .generic, locale: .current), !generic.isEmpty {
+            return generic
+        }
+        return tz.abbreviation() ?? "UTC"
     }
 }

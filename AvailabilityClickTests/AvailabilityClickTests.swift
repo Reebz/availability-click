@@ -2069,3 +2069,65 @@ struct MarkdownFormatTests {
         #expect(tz.contains("+9"))
     }
 }
+
+// ============================================================================
+// MARK: - Timezone Label Tests (U2/R3)
+// ============================================================================
+
+@Suite("Timezone Label")
+struct TimezoneLabelTests {
+    // Names are locale-dependent ("ET" vs "New York Time", "Germany Time"),
+    // and timezoneString reads the system locale, so these assert STRUCTURE,
+    // not exact strings: one GMT offset, and a readable name that is not
+    // itself an offset. That is exactly what R3 promises.
+
+    /// Number of "GMT+"/"GMT-" offset tokens in a label. The shipped bug
+    /// produced two ("GMT+2, GMT+2"); the fix produces one.
+    private func offsetTokenCount(_ s: String) -> Int {
+        (s.components(separatedBy: "GMT+").count - 1) + (s.components(separatedBy: "GMT-").count - 1)
+    }
+
+    @Test func easternZones_oneOffsetToken_readableName() throws {
+        for id in ["Europe/Berlin", "Asia/Kolkata", "Australia/Sydney"] {
+            let tz = try #require(TimeZone(identifier: id))
+            let label = AvailabilityFormatter.timezoneString(for: tz)
+            #expect(offsetTokenCount(label) == 1, "\(id): \(label)")
+            let name = label.components(separatedBy: ", ").first ?? ""
+            #expect(!name.isEmpty, "\(id): \(label)")
+            #expect(!name.hasPrefix("GMT+") && !name.hasPrefix("GMT-"), "\(id): \(label)")
+        }
+    }
+
+    @Test func newYork_keepsSensibleLabel() throws {
+        let tz = try #require(TimeZone(identifier: "America/New_York"))
+        let label = AvailabilityFormatter.timezoneString(for: tz)
+        #expect(offsetTokenCount(label) == 1)
+        #expect(label.contains("GMT-"))  // New York is west of GMT year-round
+        let name = label.components(separatedBy: ", ").first ?? ""
+        #expect(!name.isEmpty)
+    }
+
+    @Test func fixedOffsetZone_fallsThroughChainWithoutCrash() throws {
+        // A bare fixed-offset zone has no human name — .shortGeneric may be
+        // nil or itself an offset. The point of the seam is that the chain
+        // never crashes and always yields a non-empty string (named zones the
+        // picker actually offers get the readable name tested above). Such a
+        // synthetic zone is not selectable in the app.
+        let tz = try #require(TimeZone(secondsFromGMT: 5 * 3600))
+        let name = AvailabilityFormatter.localizedZoneName(for: tz)
+        #expect(!name.isEmpty)
+        #expect(AvailabilityFormatter.timezoneString(for: tz).contains("GMT+5"))
+    }
+
+    @Test func plainAndAttributedRenderers_shareTimezoneLabel() {
+        let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
+        let slots: [Date: [TimeSlot]] = [date(2026, 3, 25): [slot(25, 9, 0, 10, 0)]]
+        let plainLast = formatter.format(slots: slots, showTimeZone: true)
+            .split(separator: "\n").map(String.init).last ?? ""
+        let attrLast = formatter.formatAttributed(slots: slots, showTimeZone: true)
+            .string.split(separator: "\n").map(String.init).last ?? ""
+        #expect(attrLast == plainLast)
+        #expect(plainLast.hasPrefix("(") && plainLast.hasSuffix(")"))
+        #expect(offsetTokenCount(plainLast) == 1)
+    }
+}
