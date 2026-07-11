@@ -201,7 +201,7 @@ final class StatusItemController: NSObject {
                 NSPasteboard.general.setString(text, forType: .string)
                 self?.previewPopover?.close()
                 self?.previewPopover = nil
-                self?.flashConfirmation(success: true)
+                self?.showOutcome(.copied)
             },
             onDismiss: { [weak self] in
                 self?.previewPopover?.close()
@@ -225,14 +225,17 @@ final class StatusItemController: NSObject {
 
     // MARK: - Feedback Animation
 
-    func flashConfirmation(success: Bool) {
-        let symbolName = success ? "checkmark.circle.fill" : "xmark.circle"
+    /// Flashes the outcome symbol and sets the button tooltip to the failure
+    /// reason. The tooltip is written on every outcome (nil on success) so
+    /// stale failure text never lingers past the next attempt (KTD3).
+    func showOutcome(_ outcome: CopyOutcome) {
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+        let image = NSImage(systemSymbolName: outcome.symbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
         image?.isTemplate = true
 
         statusItem.button?.image = image
+        statusItem.button?.toolTip = outcome.tooltip
 
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in

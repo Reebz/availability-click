@@ -908,6 +908,164 @@ struct DateFromMinutesTests {
 }
 
 // ============================================================================
+// MARK: - Calendar Selection Tests (KTD2)
+// ============================================================================
+
+@Suite("Calendar Selection")
+@MainActor
+struct CalendarSelectionTests {
+    let allIDs = ["work", "home", "shared"]
+
+    // MARK: - effectiveSelectedIDs (read path)
+
+    @Test func emptySelection_resolvesToAllCalendars() {
+        let result = CalendarService.effectiveSelectedIDs(saved: [], allIDs: allIDs)
+        #expect(result == Set(allIDs))
+    }
+
+    @Test func storedSubset_behaviorUnchanged() {
+        let result = CalendarService.effectiveSelectedIDs(saved: ["work"], allIDs: allIDs)
+        #expect(result == ["work"])
+    }
+
+    @Test func allStaleIDs_fallsBackToAllCalendars() {
+        let result = CalendarService.effectiveSelectedIDs(saved: ["deleted-1", "deleted-2"], allIDs: allIDs)
+        #expect(result == Set(allIDs))
+    }
+
+    @Test func partiallyStaleIDs_keepsValidOnly() {
+        let result = CalendarService.effectiveSelectedIDs(saved: ["work", "deleted"], allIDs: allIDs)
+        #expect(result == ["work"])
+    }
+
+    @Test func emptyStore_resolvesEmpty() {
+        let result = CalendarService.effectiveSelectedIDs(saved: ["work"], allIDs: [])
+        #expect(result.isEmpty)
+    }
+
+    // MARK: - updatedSelection (write path)
+
+    @Test func fullSelection_persistsExplicitIDs_neverCollapsesToEmpty() {
+        // Uncheck then re-check: the stored set stays explicit (KTD2 -- the
+        // old write path collapsed a full selection back to []).
+        let afterUncheck = CalendarPickerView.updatedSelection(
+            togglingID: "home", isOn: false, current: [], allIDs: allIDs
+        )
+        #expect(afterUncheck == ["work", "shared"])
+
+        let afterRecheck = CalendarPickerView.updatedSelection(
+            togglingID: "home", isOn: true, current: afterUncheck!, allIDs: allIDs
+        )
+        #expect(afterRecheck == Set(allIDs))
+        #expect(afterRecheck?.isEmpty == false)
+    }
+
+    @Test func firstTouch_expandsNeverCustomizedToFullSet() {
+        let result = CalendarPickerView.updatedSelection(
+            togglingID: "work", isOn: false, current: [], allIDs: allIDs
+        )
+        #expect(result == ["home", "shared"])
+    }
+
+    @Test func uncheckLastSelected_blocked_selectionUnchanged() {
+        let result = CalendarPickerView.updatedSelection(
+            togglingID: "work", isOn: false, current: ["work"], allIDs: allIDs
+        )
+        #expect(result == nil)
+    }
+
+    @Test func uncheckOnlyCalendar_neverCustomized_blocked() {
+        let result = CalendarPickerView.updatedSelection(
+            togglingID: "solo", isOn: false, current: [], allIDs: ["solo"]
+        )
+        #expect(result == nil)
+    }
+
+    @Test func recheckWhileBlockedStateIntact_addsNormally() {
+        let result = CalendarPickerView.updatedSelection(
+            togglingID: "home", isOn: true, current: ["work"], allIDs: allIDs
+        )
+        #expect(result == ["work", "home"])
+    }
+}
+
+// ============================================================================
+// MARK: - Copy Outcome Tests (KTD3)
+// ============================================================================
+
+@Suite("Copy Outcome")
+@MainActor
+struct CopyOutcomeTests {
+    // MARK: - Gate Ordering (OQ4: authorization precedes debounce)
+
+    @Test func noAccess_whenUnauthorized_regardlessOfDebounceState() {
+        #expect(
+            AppDelegate.copyDecision(
+                isAuthorized: false, debouncePassed: false, hasCalendars: true, hasSlots: true
+            ) == .noAccess
+        )
+        #expect(
+            AppDelegate.copyDecision(
+                isAuthorized: false, debouncePassed: true, hasCalendars: true, hasSlots: true
+            ) == .noAccess
+        )
+    }
+
+    @Test func debounce_swallowsOnlyAuthorizedRepeatClicks() {
+        #expect(
+            AppDelegate.copyDecision(
+                isAuthorized: true, debouncePassed: false, hasCalendars: true, hasSlots: true
+            ) == nil
+        )
+    }
+
+    @Test func noCalendars_whenSelectionResolvesEmpty() {
+        #expect(
+            AppDelegate.copyDecision(
+                isAuthorized: true, debouncePassed: true, hasCalendars: false, hasSlots: true
+            ) == .noCalendars
+        )
+    }
+
+    @Test func noSlots_whenAuthorizedFetchYieldsNothingViable() {
+        #expect(
+            AppDelegate.copyDecision(
+                isAuthorized: true, debouncePassed: true, hasCalendars: true, hasSlots: false
+            ) == .noSlots
+        )
+    }
+
+    @Test func copied_whenAllGatesPass() {
+        #expect(
+            AppDelegate.copyDecision(
+                isAuthorized: true, debouncePassed: true, hasCalendars: true, hasSlots: true
+            ) == .copied
+        )
+    }
+
+    // MARK: - Feedback Mapping (OQ11 distinct symbols, tooltip lifecycle)
+
+    @Test func failureOutcomes_carryOneLineReasons() {
+        #expect(CopyOutcome.noAccess.tooltip == "Calendar access not granted - open Settings")
+        #expect(CopyOutcome.noCalendars.tooltip == "No calendars available")
+        #expect(CopyOutcome.noSlots.tooltip == "No free slots in this range")
+    }
+
+    @Test func successOutcome_clearsTooltip() {
+        // showOutcome writes the tooltip on every outcome; nil on .copied is
+        // what guarantees a failure tooltip is cleared by a later success.
+        #expect(CopyOutcome.copied.tooltip == nil)
+    }
+
+    @Test func eachOutcome_hasDistinctSymbol() {
+        let symbols = Set(
+            [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots].map(\.symbolName)
+        )
+        #expect(symbols.count == 4)
+    }
+}
+
+// ============================================================================
 // MARK: - GlobalShortcutManager Tests
 // ============================================================================
 

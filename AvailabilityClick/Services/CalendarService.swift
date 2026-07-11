@@ -48,16 +48,23 @@ final class CalendarService {
     }
 
     func selectedCalendars() -> [EKCalendar] {
-        let savedIDs = Set(AppSettings.selectedCalendarIDs)
         let all = allCalendars
+        let effective = Self.effectiveSelectedIDs(
+            saved: AppSettings.selectedCalendarIDs,
+            allIDs: all.map(\.calendarIdentifier)
+        )
+        return all.filter { effective.contains($0.calendarIdentifier) }
+    }
 
-        // Empty selection means "all calendars"
-        if savedIDs.isEmpty { return all }
+    /// Selection resolution (KTD2), extracted pure so it is unit-testable:
+    /// `[]` means "never customized = all calendars"; a saved set whose IDs
+    /// are all stale also falls back to all calendars.
+    static func effectiveSelectedIDs(saved: [String], allIDs: [String]) -> Set<String> {
+        let savedSet = Set(saved)
+        if savedSet.isEmpty { return Set(allIDs) }
 
-        let valid = all.filter { savedIDs.contains($0.calendarIdentifier) }
-
-        // If all saved IDs are stale, fall back to all calendars
-        if valid.isEmpty && !all.isEmpty { return all }
+        let valid = savedSet.intersection(allIDs)
+        if valid.isEmpty && !allIDs.isEmpty { return Set(allIDs) }
 
         return valid
     }

@@ -1,5 +1,35 @@
 import AppKit
 
+/// Outcome of a copy attempt (KTD3). Replaces the old success boolean so a
+/// failed click can say why: distinct symbol per failure (OQ11) plus a
+/// tooltip as the detail layer.
+enum CopyOutcome: Equatable {
+    case copied
+    case noAccess
+    case noCalendars
+    case noSlots
+
+    var symbolName: String {
+        switch self {
+        case .copied: "checkmark.circle.fill"
+        case .noAccess: "lock.circle"
+        case .noCalendars: "calendar.badge.exclamationmark"
+        case .noSlots: "xmark.circle"
+        }
+    }
+
+    /// One-line failure reason; nil on success so a stale failure tooltip
+    /// never outlives the outcome that set it.
+    var tooltip: String? {
+        switch self {
+        case .copied: nil
+        case .noAccess: "Calendar access not granted - open Settings"
+        case .noCalendars: "No calendars available"
+        case .noSlots: "No free slots in this range"
+        }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController!
@@ -137,13 +167,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showPreview() {
         guard calendarService.isAuthorized else {
-            showPermissionAlert()
+            statusItemController.showOutcome(.noAccess)
+            maybeShowPermissionAlert()
             return
         }
 
         let rangeType = defaultRangeType
 
         Task { @MainActor in
+            guard !calendarService.selectedCalendars().isEmpty else {
+                statusItemController.showOutcome(.noCalendars)
+                return
+            }
+
             let dateRange = calculateDateRange(for: rangeType)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
 
@@ -153,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             if slots.isEmpty {
-                statusItemController.flashConfirmation(success: false)
+                statusItemController.showOutcome(.noSlots)
             } else {
                 statusItemController.showPreviewPopover(slots: slots)
             }
@@ -173,19 +209,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copyRange(defaultRangeType)
     }
 
+    /// Gate ordering for the copy pipeline, extracted pure so it is
+    /// unit-testable. Authorization precedes the debounce (OQ4): failure
+    /// feedback always fires, the debounce only swallows authorized repeat
+    /// clicks (nil = ignore silently). Keep copyRange's guards in sync.
+    static func copyDecision(
+        isAuthorized: Bool,
+        debouncePassed: Bool,
+        hasCalendars: Bool,
+        hasSlots: Bool
+    ) -> CopyOutcome? {
+        guard isAuthorized else { return .noAccess }
+        guard debouncePassed else { return nil }
+        guard hasCalendars else { return .noCalendars }
+        guard hasSlots else { return .noSlots }
+        return .copied
+    }
+
     private func copyRange(_ rangeType: DateRangeType) {
+        // Authorization before debounce (OQ4) -- see copyDecision above.
+        guard calendarService.isAuthorized else {
+            statusItemController.showOutcome(.noAccess)
+            maybeShowPermissionAlert()
+            return
+        }
+
         // Debounce rapid clicks
         let now = Date()
         guard now.timeIntervalSince(lastCopyTime) > 0.5 else { return }
         lastCopyTime = now
 
-        // Check authorization
-        guard calendarService.isAuthorized else {
-            showPermissionAlert()
-            return
-        }
-
         Task { @MainActor in
+            guard !calendarService.selectedCalendars().isEmpty else {
+                statusItemController.showOutcome(.noCalendars)
+                return
+            }
+
             let dateRange = calculateDateRange(for: rangeType)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
 
@@ -196,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             if slots.isEmpty {
-                statusItemController.flashConfirmation(success: false)
+                statusItemController.showOutcome(.noSlots)
             } else {
                 let template = AppSettings.defaultFormatTemplate
                 let text = formatter.format(
@@ -208,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
 
-                statusItemController.flashConfirmation(success: true)
+                statusItemController.showOutcome(.copied)
             }
         }
     }
@@ -243,11 +302,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var hasShownPermissionAlert = false
 
-    private func showPermissionAlert() {
-        // Always give visible click feedback, even after the one-shot alert
-        // has fired -- otherwise unauthorized clicks are silent no-ops.
-        statusItemController.flashConfirmation(success: false)
-
+    /// One-shot per launch; the caller has already flashed `.noAccess`, so
+    /// repeat unauthorized clicks still get visible feedback without
+    /// re-modal-ing the alert.
+    private func maybeShowPermissionAlert() {
         guard !hasShownPermissionAlert else { return }
         hasShownPermissionAlert = true
 
