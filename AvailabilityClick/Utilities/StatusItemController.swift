@@ -23,6 +23,10 @@ final class StatusItemController: NSObject {
     /// Called when user selects a range from the right-click menu
     var onRangeSelected: ((DateRangeType) -> Void)?
 
+    /// Called when user picks "Copy 3 Suggested Times" from the right-click
+    /// menu (U4 proposal mode).
+    var onProposal: (() -> Void)?
+
     func setup() {
         // Use variable length so the icon area is slightly wider (easier to click)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -61,6 +65,15 @@ final class StatusItemController: NSObject {
     }
 
     private func showContextMenu() {
+        let menu = contextMenu()
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    /// Builds the right-click menu. Internal so a test can assert the proposal
+    /// item is present and wired to an action.
+    func contextMenu() -> NSMenu {
         let menu = NSMenu()
 
         let nextWeekItem = NSMenuItem(title: "Next week", action: #selector(copyNextWeek), keyEquivalent: "")
@@ -74,6 +87,10 @@ final class StatusItemController: NSObject {
         let thirtyDaysItem = NSMenuItem(title: "Next 30 days", action: #selector(copyNext30Days), keyEquivalent: "")
         thirtyDaysItem.target = self
         menu.addItem(thirtyDaysItem)
+
+        let proposalItem = NSMenuItem(title: "Copy 3 Suggested Times", action: #selector(copySuggestedTimes), keyEquivalent: "")
+        proposalItem.target = self
+        menu.addItem(proposalItem)
 
         menu.addItem(.separator())
 
@@ -96,15 +113,19 @@ final class StatusItemController: NSObject {
         let quitItem = NSMenuItem(title: "Quit Availability Click", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil
+        return menu
     }
 
     // MARK: - Menu Actions
 
     @objc private func copyNextWeek() {
         onRangeSelected?(.nextWeek)
+    }
+
+    /// Internal (not private) so a test can invoke it directly to prove the
+    /// menu action reaches the proposal pipeline.
+    @objc func copySuggestedTimes() {
+        onProposal?()
     }
 
     @objc private func copyNextFortnight() {

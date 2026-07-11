@@ -7,6 +7,10 @@ enum DateRangeType: Equatable {
     case nextWeek
     case nextFortnight
     case next30Days
+    /// Proposal window (U4): 30 calendar days starting today (not tomorrow),
+    /// so a proposal can offer today's remaining slots. Internal to the
+    /// proposal path — not exposed by the menu or the Shortcuts intent.
+    case next30DaysIncludingToday
 }
 
 /// Seam over EKEvent so the busy/free decision matrix is unit-testable:
@@ -171,6 +175,9 @@ struct AvailabilityService {
 
         case .next30Days:
             return next30CalendarDays(from: today, workingDays: workingDays)
+
+        case .next30DaysIncludingToday:
+            return next30CalendarDaysIncludingToday(from: today, workingDays: workingDays, now: now)
         }
     }
 
@@ -287,6 +294,66 @@ struct AvailabilityService {
             }
         }
         return days
+    }
+
+    /// Like `next30CalendarDays` but starting TODAY (U4 proposal window):
+    /// working days only, and today is included only when the today-buffer
+    /// leaves viable time — mirroring how business-day ranges treat today.
+    private func next30CalendarDaysIncludingToday(
+        from today: Date, workingDays: Set<Int>, now: Date
+    ) -> [Date] {
+        var days: [Date] = []
+        for i in 0..<30 {
+            guard let day = calendar.date(byAdding: .day, value: i, to: today) else { continue }
+            let wd = calendar.component(.weekday, from: day)
+            guard workingDays.contains(wd) else { continue }
+            if calendar.isDate(day, inSameDayAs: today) {
+                let buffered = now.addingTimeInterval(TimeInterval(AppSettings.todayBufferMinutes * 60))
+                let workEnd = dateFromMinutes(AppSettings.workingHoursEnd, on: day)
+                if buffered >= workEnd { continue }
+            }
+            days.append(day)
+        }
+        return days
+    }
+
+    // MARK: - Proposal Selection (U4)
+
+    /// Picks up to `count` well-spread slots for the proposal sentence (KTD6):
+    /// the earliest slot on each of the first `count` distinct days with
+    /// availability; when distinct days run out, additional slots on
+    /// already-used days (earliest first) fill the remainder. Pure and static —
+    /// consumes the normal post-pipeline dictionary, so it inherits the event
+    /// buffer, rounding and min-slot filtering and never re-derives
+    /// availability.
+    static func selectProposalSlots(from slots: [Date: [TimeSlot]], count: Int) -> [TimeSlot] {
+        guard count > 0 else { return [] }
+        let sortedDays = slots.keys.sorted()
+
+        var chosen: [TimeSlot] = []
+        for day in sortedDays {
+            guard chosen.count < count else { break }
+            if let earliest = slots[day]?.min(by: { $0.start < $1.start }) {
+                chosen.append(earliest)
+            }
+        }
+
+        // Fewer than `count` distinct days: fall back to the later slots on the
+        // days already used, earliest first (dropFirst skips each day's already
+        // chosen earliest).
+        if chosen.count < count {
+            var extras: [TimeSlot] = []
+            for day in sortedDays {
+                guard let daySlots = slots[day] else { continue }
+                extras.append(contentsOf: daySlots.sorted { $0.start < $1.start }.dropFirst())
+            }
+            for slot in extras.sorted(by: { $0.start < $1.start }) {
+                guard chosen.count < count else { break }
+                chosen.append(slot)
+            }
+        }
+
+        return chosen.sorted { $0.start < $1.start }
     }
 
     // MARK: - Event Buffer Padding

@@ -808,6 +808,31 @@ struct RangeTests {
         #expect(firstDay == 26)
     }
 
+    // MARK: - Next 30 Days Including Today (U4 proposal window)
+
+    @Test func next30DaysIncludingToday_startsToday_whenViable() async {
+        await withPinnedSettings(stockWorkingSettings) {
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let days = service.businessDaysForRange(
+                .next30DaysIncludingToday, from: wedMorning, workingDays: monFri
+            )
+            #expect(days.first == cal.startOfDay(for: wedMorning))
+            for d in days { #expect(monFri.contains(cal.component(.weekday, from: d))) }
+            #expect(days.count >= 20 && days.count <= 23)
+        }
+    }
+
+    @Test func next30DaysIncludingToday_skipsToday_whenBufferedPastWorkEnd() async {
+        await withPinnedSettings(stockWorkingSettings) {
+            // 4:30pm + 1h buffer clears 5pm work end, so today drops.
+            let wedLate = date(2026, 3, 25, 16, 30)
+            let days = service.businessDaysForRange(
+                .next30DaysIncludingToday, from: wedLate, workingDays: monFri
+            )
+            #expect(days.first == date(2026, 3, 26))
+        }
+    }
+
     // MARK: - Custom Working Days
 
     @Test func customWorkingDays_includeSaturday() {
@@ -1613,6 +1638,25 @@ struct PasteboardWriterTests {
         #expect(!wrote)
         #expect(pb.string(forType: .string) == "sentinel")
     }
+
+    // MARK: - writeText (U4 proposal path)
+
+    @Test func writeText_writesAllThreeFlavors() throws {
+        let pb = testPasteboard()
+        let text = "Here are a few times — reply with a number: 1) A; 2) B; 3) C."
+        #expect(PasteboardWriter.writeText(text, pasteboard: pb))
+        #expect(pb.string(forType: .string) == text)
+        #expect(pb.data(forType: .rtf) != nil)
+        #expect(pb.data(forType: .html) != nil)
+    }
+
+    @Test func writeText_empty_returnsFalse_pasteboardUntouched() {
+        let pb = testPasteboard()
+        pb.clearContents()
+        pb.setString("sentinel", forType: .string)
+        #expect(!PasteboardWriter.writeText("", pasteboard: pb))
+        #expect(pb.string(forType: .string) == "sentinel")
+    }
 }
 
 // ============================================================================
@@ -2197,5 +2241,145 @@ struct AsOfStampTests {
             .split(separator: "\n").map(String.init).last
         #expect(ny == "(as of Mar 25, 2026, 2:00 PM)")
         #expect(la == "(as of Mar 25, 2026, 11:00 AM)")  // 18:00 UTC = 11:00 PDT
+    }
+}
+
+// ============================================================================
+// MARK: - Proposal Mode Tests (U4/R1/R2)
+// ============================================================================
+
+@Suite("Proposal Mode")
+struct ProposalModeTests {
+    let service = AvailabilityService()
+    let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
+
+    // MARK: - selectProposalSlots (KTD6)
+
+    @Test func fiveDays_picksEarliestOnFirstThreeDistinctDays() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 23): [slot(23, 9, 0, 10, 0), slot(23, 14, 0, 15, 0)],
+            date(2026, 3, 24): [slot(24, 11, 0, 12, 0)],
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 0), slot(25, 15, 0, 16, 0)],
+            date(2026, 3, 26): [slot(26, 9, 0, 10, 0)],
+            date(2026, 3, 27): [slot(27, 9, 0, 10, 0)],
+        ]
+        let chosen = AvailabilityService.selectProposalSlots(from: slots, count: 3)
+        #expect(chosen.map(\.start) == [
+            date(2026, 3, 23, 9, 0), date(2026, 3, 24, 11, 0), date(2026, 3, 25, 9, 0),
+        ])
+    }
+
+    @Test func oneDayThreeSlots_sameDayFallbackFillsToThree() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 0), slot(25, 11, 0, 12, 0), slot(25, 14, 0, 15, 0)],
+        ]
+        let chosen = AvailabilityService.selectProposalSlots(from: slots, count: 3)
+        #expect(chosen.map(\.start) == [
+            date(2026, 3, 25, 9, 0), date(2026, 3, 25, 11, 0), date(2026, 3, 25, 14, 0),
+        ])
+    }
+
+    @Test func twoSlotsTotal_returnsTwo() {
+        let slots: [Date: [TimeSlot]] = [
+            date(2026, 3, 25): [slot(25, 9, 0, 10, 0)],
+            date(2026, 3, 26): [slot(26, 9, 0, 10, 0)],
+        ]
+        #expect(AvailabilityService.selectProposalSlots(from: slots, count: 3).count == 2)
+    }
+
+    @Test func oneSlotTotal_returnsOne() {
+        let slots: [Date: [TimeSlot]] = [date(2026, 3, 25): [slot(25, 9, 0, 10, 0)]]
+        #expect(AvailabilityService.selectProposalSlots(from: slots, count: 3).count == 1)
+    }
+
+    @Test func zeroSlots_returnsEmpty() {
+        #expect(AvailabilityService.selectProposalSlots(from: [:], count: 3).isEmpty)
+    }
+
+    @Test func countZero_returnsEmpty() {
+        let slots: [Date: [TimeSlot]] = [date(2026, 3, 25): [slot(25, 9, 0, 10, 0)]]
+        #expect(AvailabilityService.selectProposalSlots(from: slots, count: 0).isEmpty)
+    }
+
+    @Test func selectionInheritsBuffer_noReDerivation() async {
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.roundingGranularityKey] = 0
+        pinned[AppSettings.eventBufferMinutesKey] = 10
+        await withPinnedSettings(pinned) {
+            let store = EKEventStore()
+            let m = EKEvent(eventStore: store)
+            m.startDate = date(2026, 3, 25, 10, 0)
+            m.endDate = date(2026, 3, 25, 11, 0)
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let slots = service.calculateAvailability(
+                events: [m], rangeType: .businessDays(1), now: wedMorning
+            )
+            let chosen = AvailabilityService.selectProposalSlots(from: slots, count: 3)
+            // Earliest slot ends at 9:50 (10:00 minus the 10-min buffer):
+            // the proposal consumes the padded pipeline output as-is.
+            #expect(chosen.first?.end == date(2026, 3, 25, 9, 50))
+        }
+    }
+
+    // MARK: - formatProposal (R1/R2 golden strings)
+
+    @Test func threeSlots_enUSGolden() {
+        let out = formatter.formatProposal(slots: [slot(25, 9, 0, 10, 30), slot(26, 14, 0, 15, 0), slot(27, 10, 0, 12, 0)])
+        #expect(out == "Here are a few times that could work — reply with a number: 1) Wed Mar 25, 9-10:30am; 2) Thu Mar 26, 2-3pm; 3) Fri Mar 27, 10am-12pm.")
+    }
+
+    @Test func twoSlots_keepsReplyWithNumber() {
+        let out = formatter.formatProposal(slots: [slot(25, 9, 0, 10, 0), slot(26, 14, 0, 15, 0)])
+        #expect(out == "Here are a few times that could work — reply with a number: 1) Wed Mar 25, 9-10am; 2) Thu Mar 26, 2-3pm.")
+    }
+
+    @Test func oneSlot_dropsReplyWithNumber() {
+        let out = formatter.formatProposal(slots: [slot(25, 9, 0, 10, 30)])
+        #expect(out == "Here's a time that could work: Wed Mar 25, 9-10:30am.")
+    }
+
+    @Test func emptySlots_returnsEmptyString() {
+        #expect(formatter.formatProposal(slots: []) == "")
+    }
+
+    @Test func withTimezone_appendsLabelLine() {
+        let out = formatter.formatProposal(slots: [slot(25, 9, 0, 10, 0)], showTimeZone: true)
+        let lines = out.split(separator: "\n").map(String.init)
+        #expect(lines.count == 2)
+        #expect(lines[0].hasPrefix("Here's a time"))
+        #expect(lines[1].hasPrefix("(") && lines[1].contains("GMT"))
+    }
+
+    @Test func withStamp_appendsAsOfLine() {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let instant = utc.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 18))!
+        let out = formatter.formatProposal(slots: [slot(25, 9, 0, 10, 0)], asOf: instant)
+        #expect(out.split(separator: "\n").map(String.init).last?.hasPrefix("(as of ") == true)
+    }
+}
+
+// ============================================================================
+// MARK: - Proposal Menu Wiring Tests (U4)
+// ============================================================================
+
+@Suite("Proposal Menu")
+@MainActor
+struct ProposalMenuTests {
+    @Test func contextMenu_containsProposalItem_wiredToAction() {
+        let controller = StatusItemController()
+        let menu = controller.contextMenu()
+        let item = menu.items.first { $0.title == "Copy 3 Suggested Times" }
+        #expect(item != nil)
+        #expect(item?.action == #selector(StatusItemController.copySuggestedTimes))
+        #expect(item?.target === controller)
+    }
+
+    @Test func copySuggestedTimes_invokesOnProposalCallback() {
+        let controller = StatusItemController()
+        var fired = false
+        controller.onProposal = { fired = true }
+        controller.copySuggestedTimes()
+        #expect(fired)
     }
 }

@@ -135,6 +135,48 @@ struct AvailabilityFormatter {
         return "(as of \(stamp))"
     }
 
+    // MARK: - Proposal Sentence (U4)
+
+    /// Renders the pre-selected proposal slots as one numbered sentence (R1/R2)
+    /// rather than the day grid — a different shape, so it lives outside the
+    /// FormatTemplate switch. Two or three slots read "reply with a number"; a
+    /// single slot drops that phrasing (R2 honest framing). The trailing
+    /// timezone and "as of" lines match the grid renderer (they reuse the same
+    /// helpers), so the recipient timezone flows through consistently.
+    func formatProposal(
+        slots: [TimeSlot],
+        showTimeZone: Bool = false,
+        timezone: TimeZone? = nil,
+        asOf: Date? = nil
+    ) -> String {
+        guard !slots.isEmpty else { return "" }
+
+        let effectiveCalendar = calendar(for: timezone)
+        let labelFormatter = dayLabelFormatter(timeZone: effectiveCalendar.timeZone)
+        let sorted = slots.sorted { $0.start < $1.start }
+
+        func describe(_ slot: TimeSlot) -> String {
+            "\(labelFormatter.string(from: slot.start)), \(formatTimeRange(slot, using: effectiveCalendar))"
+        }
+
+        var lines: [String] = []
+        if sorted.count == 1 {
+            lines.append("Here's a time that could work: \(describe(sorted[0])).")
+        } else {
+            let items = sorted.enumerated().map { "\($0.offset + 1)) \(describe($0.element))" }
+            lines.append("Here are a few times that could work — reply with a number: \(items.joined(separator: "; ")).")
+        }
+
+        if showTimeZone {
+            lines.append("(\(Self.timezoneString(for: timezone)))")
+        }
+        if let asOf {
+            lines.append(asOfLine(asOf, timezone: timezone))
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Shared Line Building
 
     private func calendar(for timezone: TimeZone?) -> Calendar {

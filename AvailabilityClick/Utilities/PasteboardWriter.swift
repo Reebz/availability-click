@@ -56,4 +56,34 @@ enum PasteboardWriter {
         pasteboard.setString(plain, forType: .string)
         return true
     }
+
+    /// Writes pre-rendered text (the U4 proposal sentence) with the same flavor
+    /// set as the plain template — .string plus .rtf/.html generated from the
+    /// (unformatted) text — so it pastes identically into plain and rich
+    /// targets. Returns false and leaves the pasteboard untouched when empty.
+    @discardableResult
+    static func writeText(_ text: String, pasteboard: NSPasteboard = .general) -> Bool {
+        guard !text.isEmpty else { return false }
+
+        pasteboard.clearContents()
+
+        let attributed = NSAttributedString(
+            string: text,
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]
+        )
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        if let rtf = try? attributed.data(
+            from: fullRange, documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        ) {
+            pasteboard.setData(rtf, forType: .rtf)
+        }
+        if let html = try? attributed.data(
+            from: fullRange, documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
+        ) {
+            pasteboard.setData(html, forType: .html)
+        }
+
+        pasteboard.setString(text, forType: .string)
+        return true
+    }
 }

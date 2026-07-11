@@ -55,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.onOptionClick = { [weak self] in
             self?.showPreview()
         }
+        statusItemController.onProposal = { [weak self] in
+            self?.copyProposal()
+        }
         statusItemController.setup()
 
         // Set up global keyboard shortcut
@@ -312,6 +315,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 statusItemController.showOutcome(.copied)
             }
+        }
+    }
+
+    // MARK: - Proposal Mode (U4)
+
+    /// Copies a numbered one-sentence proposal of up to 3 well-spread times
+    /// over the today-inclusive 30-day window. Same auth/debounce/no-calendars
+    /// gates as copyRange; an empty proposal is the ordinary no-slots outcome.
+    private func copyProposal() {
+        guard calendarService.isAuthorized else {
+            handleUnauthorizedInteraction()
+            return
+        }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastCopyTime) > 0.5 else { return }
+        lastCopyTime = now
+
+        Task { @MainActor in
+            guard !calendarService.selectedCalendars().isEmpty else {
+                statusItemController.showOutcome(.noCalendars)
+                return
+            }
+
+            let rangeType: DateRangeType = .next30DaysIncludingToday
+            let dateRange = availabilityService.fetchWindow(for: rangeType, now: now)
+            let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
+            let slots = availabilityService.calculateAvailability(
+                events: events, rangeType: rangeType, now: now
+            )
+
+            let proposal = AvailabilityService.selectProposalSlots(from: slots, count: 3)
+            guard !proposal.isEmpty else {
+                statusItemController.showOutcome(.noSlots)
+                return
+            }
+
+            let text = AvailabilityFormatter().formatProposal(
+                slots: proposal,
+                showTimeZone: AppSettings.showTimeZone,
+                asOf: AppSettings.showAsOfStamp ? now : nil
+            )
+            PasteboardWriter.writeText(text)
+            statusItemController.showOutcome(.copied)
         }
     }
 
