@@ -9,6 +9,30 @@ enum DateRangeType {
     case next30Days
 }
 
+/// Seam over EKEvent so the busy/free decision matrix is unit-testable:
+/// EKEvent's `status` and `attendees` are read-only, so tests cannot
+/// construct the canceled/declined branches on the real type (R4).
+protocol BlockableEvent {
+    var isAllDay: Bool { get }
+    var eventStart: Date { get }
+    var eventEnd: Date { get }
+    var isCanceled: Bool { get }
+    var isFreeAvailability: Bool { get }
+    var isDeclinedByCurrentUser: Bool { get }
+}
+
+extension EKEvent: BlockableEvent {
+    var eventStart: Date { startDate }
+    var eventEnd: Date { endDate }
+    var isCanceled: Bool { status == .canceled }
+    var isFreeAvailability: Bool { availability == .free }
+    var isDeclinedByCurrentUser: Bool {
+        guard let attendees, !attendees.isEmpty,
+              let me = attendees.first(where: { $0.isCurrentUser }) else { return false }
+        return me.participantStatus == .declined
+    }
+}
+
 struct AvailabilityService {
     // Computed so a system timezone change mid-run is picked up immediately
     // (Calendar.current is a frozen snapshot, unlike autoupdatingCurrent).
@@ -89,18 +113,12 @@ struct AvailabilityService {
 
     // MARK: - Event Filtering
 
-    func shouldBlockTime(_ event: EKEvent) -> Bool {
+    func shouldBlockTime(_ event: some BlockableEvent) -> Bool {
         if event.isAllDay { return false }
         if isEffectivelyAllDay(event) { return false }
-        if event.status == .canceled { return false }
-        if event.availability == .free { return false }
-
-        if let attendees = event.attendees, !attendees.isEmpty,
-           let me = attendees.first(where: { $0.isCurrentUser }),
-           me.participantStatus == .declined {
-            return false
-        }
-
+        if event.isCanceled { return false }
+        if event.isFreeAvailability { return false }
+        if event.isDeclinedByCurrentUser { return false }
         return true
     }
 
@@ -310,13 +328,13 @@ struct AvailabilityService {
 
     // MARK: - Helpers
 
-    private func isEffectivelyAllDay(_ event: EKEvent) -> Bool {
-        let startMidnight = calendar.startOfDay(for: event.startDate) == event.startDate
-        let endMidnight = calendar.startOfDay(for: event.endDate) == event.endDate
+    func isEffectivelyAllDay(_ event: some BlockableEvent) -> Bool {
+        let startMidnight = calendar.startOfDay(for: event.eventStart) == event.eventStart
+        let endMidnight = calendar.startOfDay(for: event.eventEnd) == event.eventEnd
         // Compare by day span, not fixed seconds: a DST spring-forward day is
         // only 23 hours, and a midnight-to-midnight event on it is still all-day.
         return startMidnight && endMidnight
-            && (calendar.dateComponents([.day], from: event.startDate, to: event.endDate).day ?? 0) >= 1
+            && (calendar.dateComponents([.day], from: event.eventStart, to: event.eventEnd).day ?? 0) >= 1
     }
 
     func dateFromMinutes(_ minutes: Int, on day: Date) -> Date {

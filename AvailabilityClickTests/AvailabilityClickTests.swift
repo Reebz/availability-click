@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AppKit
+import EventKit
 @testable import AvailabilityClick
 
 // MARK: - Test Helpers
@@ -22,7 +23,7 @@ private func slot(_ day: Int, _ startHour: Int, _ startMin: Int, _ endHour: Int,
 /// `body`, then restores whatever was there before. TEST_HOST is the real
 /// app bundle, so UserDefaults.standard is the developer's live settings --
 /// tests that read AppSettings must not depend on (or clobber) them.
-private func withPinnedSettings(_ overrides: [String: Int], run body: () -> Void) {
+private func withPinnedSettings(_ overrides: [String: Any], run body: () -> Void) {
     let defaults = UserDefaults.standard
     let originals = overrides.keys.map { ($0, defaults.object(forKey: $0)) }
     for (key, value) in overrides { defaults.set(value, forKey: key) }
@@ -860,6 +861,169 @@ struct SlotRoundingTests {
         let end = date(2026, 3, 25, 14, 8)
         #expect(service.roundUp(start, toMinutes: 0) == start)
         #expect(service.roundDown(end, toMinutes: 0) == end)
+    }
+
+    // MARK: - Rounding Integration (end-to-end through calculateAvailability)
+
+    @Test func slotDropped_whenRoundingMakesStartGteEnd_dayAbsentEndToEnd() {
+        withPinnedSettings(stockWorkingSettings) {
+            // Busy 9:00-10:47 and 10:52-17:00 leave only a 5-minute gap;
+            // 30-min rounding collapses it (start 11:00 >= end 10:30), so the
+            // whole day must be absent from the result, not just the slot.
+            let store = EKEventStore()
+            let first = EKEvent(eventStore: store)
+            first.startDate = date(2026, 3, 25, 9, 0)
+            first.endDate = date(2026, 3, 25, 10, 47)
+            let second = EKEvent(eventStore: store)
+            second.startDate = date(2026, 3, 25, 10, 52)
+            second.endDate = date(2026, 3, 25, 17, 0)
+
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let result = service.calculateAvailability(
+                events: [first, second],
+                rangeType: .businessDays(1),
+                now: wedMorning
+            )
+            #expect(result[date(2026, 3, 25)] == nil)
+            #expect(result.isEmpty)
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Event Filter Matrix Tests (R4, via BlockableEvent seam)
+// ============================================================================
+
+/// Test double for the branches EKEvent cannot express in tests (its
+/// `status` and `attendees` are read-only).
+private struct StubEvent: BlockableEvent {
+    var isAllDay = false
+    var eventStart: Date
+    var eventEnd: Date
+    var isCanceled = false
+    var isFreeAvailability = false
+    var isDeclinedByCurrentUser = false
+}
+
+@Suite("Event Filter Matrix")
+struct EventFilterMatrixTests {
+    let service = AvailabilityService()
+
+    private func busyHour(_ day: Int = 25) -> (Date, Date) {
+        (date(2026, 3, day, 10, 0), date(2026, 3, day, 11, 0))
+    }
+
+    @Test func ordinaryBusyEvent_blocks() {
+        let (start, end) = busyHour()
+        #expect(service.shouldBlockTime(StubEvent(eventStart: start, eventEnd: end)))
+    }
+
+    @Test func allDayFlag_blocksNothing() {
+        let (start, end) = busyHour()
+        let event = StubEvent(isAllDay: true, eventStart: start, eventEnd: end)
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func midnightToMidnight_oneDay_blocksNothing() {
+        let event = StubEvent(eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26))
+        #expect(!service.shouldBlockTime(event))
+        #expect(service.isEffectivelyAllDay(event))
+    }
+
+    @Test func midnightToMidnight_multiDay_blocksNothing() {
+        let event = StubEvent(eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 28))
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func midnightToMidnight_dstSpringForwardDay_blocksNothing() {
+        // 2026-10-04 is the AEDT spring-forward date (a 23-hour day) when the
+        // machine observes Australian DST; elsewhere it is an ordinary day.
+        // The day-span comparison must call it effectively-all-day either way.
+        let event = StubEvent(eventStart: date(2026, 10, 4), eventEnd: date(2026, 10, 5))
+        #expect(!service.shouldBlockTime(event))
+        #expect(service.isEffectivelyAllDay(event))
+    }
+
+    @Test func midnightStart_partialDay_blocks() {
+        let event = StubEvent(eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 25, 12, 0))
+        #expect(service.shouldBlockTime(event))
+        #expect(!service.isEffectivelyAllDay(event))
+    }
+
+    @Test func lateEvening_endingAtMidnight_blocks() {
+        let event = StubEvent(eventStart: date(2026, 3, 25, 22, 0), eventEnd: date(2026, 3, 26))
+        #expect(service.shouldBlockTime(event))
+    }
+
+    @Test func canceledEvent_blocksNothing() {
+        let (start, end) = busyHour()
+        let event = StubEvent(eventStart: start, eventEnd: end, isCanceled: true)
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func freeAvailabilityEvent_blocksNothing() {
+        let (start, end) = busyHour()
+        let event = StubEvent(eventStart: start, eventEnd: end, isFreeAvailability: true)
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func declinedByCurrentUser_blocksNothing() {
+        let (start, end) = busyHour()
+        let event = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true)
+        #expect(!service.shouldBlockTime(event))
+    }
+}
+
+// ============================================================================
+// MARK: - Real-Key Settings Bounds Tests
+// ============================================================================
+
+@Suite("Real-Key Settings Bounds", .serialized)
+struct RealKeySettingsBoundsTests {
+    @Test func roundingGranularity_invalidValue_fallsBackToDefault() {
+        withPinnedSettings([AppSettings.roundingGranularityKey: 7]) {
+            #expect(AppSettings.roundingGranularity == AppSettings.defaultRoundingGranularity)
+        }
+    }
+
+    @Test func roundingGranularity_validValues_pass() {
+        for valid in AppSettings.validRoundingValues {
+            withPinnedSettings([AppSettings.roundingGranularityKey: valid]) {
+                #expect(AppSettings.roundingGranularity == valid)
+            }
+        }
+    }
+
+    @Test func minimumSlotMinutes_outOfBounds_fallsBackToDefault() {
+        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 5]) {
+            #expect(AppSettings.minimumSlotMinutes == AppSettings.defaultMinimumSlot)
+        }
+        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 999]) {
+            #expect(AppSettings.minimumSlotMinutes == AppSettings.defaultMinimumSlot)
+        }
+    }
+
+    @Test func minimumSlotMinutes_boundaryValues_pass() {
+        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 15]) {
+            #expect(AppSettings.minimumSlotMinutes == 15)
+        }
+        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 120]) {
+            #expect(AppSettings.minimumSlotMinutes == 120)
+        }
+    }
+
+    @Test func defaultFormat_unknownValue_fallsBackToPlainText() {
+        withPinnedSettings([AppSettings.defaultFormatKey: "yaml"]) {
+            #expect(AppSettings.defaultFormat == "plainText")
+            #expect(AppSettings.defaultFormatTemplate == .plainText)
+        }
+    }
+
+    @Test func defaultFormat_markdown_passes() {
+        withPinnedSettings([AppSettings.defaultFormatKey: "markdown"]) {
+            #expect(AppSettings.defaultFormat == "markdown")
+            #expect(AppSettings.defaultFormatTemplate == .markdown)
+        }
     }
 }
 
