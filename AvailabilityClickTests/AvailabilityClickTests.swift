@@ -1657,6 +1657,26 @@ struct PasteboardWriterTests {
         #expect(!PasteboardWriter.writeText("", pasteboard: pb))
         #expect(pb.string(forType: .string) == "sentinel")
     }
+
+    // MARK: - changeCount snapshot (U7/R6, KTD10)
+
+    @Test func snapshot_holdsAfterOurWrite_missesAfterForeignWrite() {
+        let pb = testPasteboard()
+        PasteboardWriter.write(
+            slots: sampleSlots, showTimeZone: false, template: .plainText, locale: enUS, pasteboard: pb
+        )
+        #expect(PasteboardWriter.pasteboardHoldsOurLastWrite(pb))
+        // Another writer bumps changeCount; the snapshot no longer matches.
+        pb.clearContents()
+        pb.setString("foreign", forType: .string)
+        #expect(!PasteboardWriter.pasteboardHoldsOurLastWrite(pb))
+    }
+
+    @Test func snapshot_refreshedByProposalWritePath() {
+        let pb = testPasteboard()
+        PasteboardWriter.writeText("proposal sentence", pasteboard: pb)
+        #expect(PasteboardWriter.pasteboardHoldsOurLastWrite(pb))
+    }
 }
 
 // ============================================================================
@@ -1841,17 +1861,24 @@ struct CopyOutcomeTests {
 
     @Test func eachOutcome_hasDistinctSymbol() {
         let symbols = Set(
-            [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots].map(\.symbolName)
+            [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots, .availabilityChanged].map(\.symbolName)
         )
-        #expect(symbols.count == 4)
+        #expect(symbols.count == 5)
+    }
+
+    @Test func availabilityChanged_readsAsGuidance() {
+        #expect(
+            CopyOutcome.availabilityChanged.tooltip
+                == "Availability changed since your last copy — click again to overwrite"
+        )
     }
 
     @Test func attentionAndOutcomeSymbols_allDistinct() {
         // The persistent-badge layer must never look like an outcome flash.
-        let outcomeSymbols = [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots].map(\.symbolName)
+        let outcomeSymbols = [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots, .availabilityChanged].map(\.symbolName)
         let attentionSymbols = [AttentionState.calendarsUnavailable, .copiedSlotStale].compactMap(\.symbolName)
         let all = outcomeSymbols + attentionSymbols
-        #expect(all.count == 6)
+        #expect(all.count == 7)
         #expect(Set(all).count == all.count)
     }
 
@@ -2455,5 +2482,78 @@ struct ProposalMenuTests {
         controller.onProposal = { fired = true }
         controller.copySuggestedTimes()
         #expect(fired)
+    }
+}
+
+// ============================================================================
+// MARK: - Stale Watch & Overwrite Guard Tests (U7/R5/R6)
+// ============================================================================
+
+private actor DebounceCounter {
+    private(set) var value = 0
+    func bump() { value += 1 }
+}
+
+@Suite("Stale Watch & Overwrite Guard")
+@MainActor
+struct StaleWatchGuardTests {
+    // MARK: - Overwrite guard truth table (KTD10)
+
+    @Test func guard_firesOnlyWhenPasteboardUnchangedAndSlotsChanged() {
+        #expect(AppDelegate.overwriteGuardTriggers(pasteboardUnchanged: true, slotsChanged: true, confirmationPending: false))
+        #expect(!AppDelegate.overwriteGuardTriggers(pasteboardUnchanged: true, slotsChanged: false, confirmationPending: false))
+        #expect(!AppDelegate.overwriteGuardTriggers(pasteboardUnchanged: false, slotsChanged: true, confirmationPending: false))
+        #expect(!AppDelegate.overwriteGuardTriggers(pasteboardUnchanged: false, slotsChanged: false, confirmationPending: false))
+    }
+
+    @Test func guard_pendingConfirmation_alwaysWrites() {
+        // The click after a confirmation writes regardless of the conditions.
+        #expect(!AppDelegate.overwriteGuardTriggers(pasteboardUnchanged: true, slotsChanged: true, confirmationPending: true))
+    }
+
+    // MARK: - Stale comparison (R5)
+
+    @Test func stale_whenCopiedSlotDisappears() {
+        let watched: Set<TimeSlot> = [slot(25, 9, 0, 10, 0), slot(25, 14, 0, 15, 0)]
+        let fresh: Set<TimeSlot> = [slot(25, 9, 0, 10, 0)]
+        #expect(AppDelegate.copiedSlotsBecameStale(watched: watched, fresh: fresh))
+    }
+
+    @Test func stale_whenCopiedSlotShrinks() {
+        // A new meeting covers 2:30-3, so the exact copied 2-3 slot is gone.
+        let watched: Set<TimeSlot> = [slot(25, 14, 0, 15, 0)]
+        let fresh: Set<TimeSlot> = [slot(25, 14, 0, 14, 30)]
+        #expect(AppDelegate.copiedSlotsBecameStale(watched: watched, fresh: fresh))
+    }
+
+    @Test func notStale_whenAvailabilityOnlyAdded() {
+        let watched: Set<TimeSlot> = [slot(25, 9, 0, 10, 0)]
+        let fresh: Set<TimeSlot> = [slot(25, 9, 0, 10, 0), slot(25, 14, 0, 15, 0)]
+        #expect(!AppDelegate.copiedSlotsBecameStale(watched: watched, fresh: fresh))
+    }
+
+    @Test func notStale_whenUnchanged() {
+        let s: Set<TimeSlot> = [slot(25, 9, 0, 10, 0), slot(25, 14, 0, 15, 0)]
+        #expect(!AppDelegate.copiedSlotsBecameStale(watched: s, fresh: s))
+    }
+
+    // MARK: - Trailing debounce coalescing (KTD11)
+
+    @Test func debouncer_onlyNewestGenerationIsCurrent() {
+        let d = TrailingDebouncer(delay: .milliseconds(10))
+        let g1 = d.nextGeneration()
+        let g2 = d.nextGeneration()
+        let g3 = d.nextGeneration()
+        #expect(!d.isCurrent(g1))
+        #expect(!d.isCurrent(g2))
+        #expect(d.isCurrent(g3))
+    }
+
+    @Test func debouncer_rapidTriggersCoalesceToOneRun() async {
+        let d = TrailingDebouncer(delay: .milliseconds(30))
+        let counter = DebounceCounter()
+        for _ in 0..<3 { d.schedule { await counter.bump() } }
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(await counter.value == 1)
     }
 }

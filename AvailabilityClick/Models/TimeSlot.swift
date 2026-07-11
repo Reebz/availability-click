@@ -1,6 +1,6 @@
 import Foundation
 
-struct TimeSlot {
+struct TimeSlot: Equatable, Hashable {
     let start: Date
     let end: Date
 

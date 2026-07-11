@@ -7,6 +7,20 @@ import AppKit
 /// The markdown template's syntax IS the artifact: .string only.
 @MainActor
 enum PasteboardWriter {
+    /// `changeCount` captured immediately after our last successful write (R6,
+    /// KTD10). Pasting never bumps `changeCount`; any other writer does. nil
+    /// until the first write. Every write path below refreshes it, so the
+    /// overwrite guard sees the app's own newest write on any path.
+    private(set) static var lastWriteChangeCount: Int?
+
+    /// True when the pasteboard still holds our last write untouched — its
+    /// `changeCount` equals the snapshot from that write. False before any
+    /// write and after another app writes.
+    static func pasteboardHoldsOurLastWrite(_ pasteboard: NSPasteboard = .general) -> Bool {
+        guard let snapshot = lastWriteChangeCount else { return false }
+        return pasteboard.changeCount == snapshot
+    }
+
     /// Writes all flavors after one clearContents(). Returns false (and
     /// leaves the pasteboard untouched) when there is nothing to write.
     @discardableResult
@@ -54,6 +68,7 @@ enum PasteboardWriter {
         }
 
         pasteboard.setString(plain, forType: .string)
+        lastWriteChangeCount = pasteboard.changeCount
         return true
     }
 
@@ -84,6 +99,7 @@ enum PasteboardWriter {
         }
 
         pasteboard.setString(text, forType: .string)
+        lastWriteChangeCount = pasteboard.changeCount
         return true
     }
 }

@@ -8,6 +8,9 @@ enum CopyOutcome: Equatable {
     case noAccess
     case noCalendars
     case noSlots
+    /// The overwrite guard (R6): our clipboard output is untouched but
+    /// availability changed since; this click confirms instead of overwriting.
+    case availabilityChanged
 
     var symbolName: String {
         switch self {
@@ -15,17 +18,20 @@ enum CopyOutcome: Equatable {
         case .noAccess: "lock.circle"
         case .noCalendars: "calendar.badge.exclamationmark"
         case .noSlots: "xmark.circle"
+        case .availabilityChanged: "clock.arrow.circlepath"
         }
     }
 
-    /// One-line failure reason; nil on success so a stale failure tooltip
-    /// never outlives the outcome that set it.
+    /// One-line reason; nil on success so a stale failure tooltip never
+    /// outlives the outcome that set it. `.availabilityChanged` reads as
+    /// guidance, not a failure.
     var tooltip: String? {
         switch self {
         case .copied: nil
         case .noAccess: "Calendar access not granted - open Settings"
         case .noCalendars: "No calendars available"
         case .noSlots: "No free slots in this range"
+        case .availabilityChanged: "Availability changed since your last copy — click again to overwrite"
         }
     }
 }
@@ -59,6 +65,48 @@ enum AttentionState: Equatable {
     }
 }
 
+/// Trailing-debounce coalescer keyed by a monotonic generation token (KTD11):
+/// N rapid triggers within the delay collapse to one delivery. Uses Task
+/// cancellation-by-generation, never a lock on the cooperative pool. The
+/// generation logic is pure and unit-tested; `schedule` adds only the delay.
+@MainActor
+final class TrailingDebouncer {
+    private var generation = 0
+    private let delay: Duration
+
+    init(delay: Duration) { self.delay = delay }
+
+    /// Advances the generation and returns the token for this trigger.
+    func nextGeneration() -> Int {
+        generation += 1
+        return generation
+    }
+
+    /// True only for the newest generation, so a superseded scheduled body
+    /// bails out — this is the debounce.
+    func isCurrent(_ token: Int) -> Bool { token == generation }
+
+    /// Runs `body` after the delay unless a newer trigger superseded it.
+    func schedule(_ body: @escaping @MainActor () async -> Void) {
+        let token = nextGeneration()
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard isCurrent(token) else { return }
+            await body()
+        }
+    }
+}
+
+/// What the app last copied, so a calendar change can be checked against it
+/// (R5 watch) and the next copy can detect a silent clobber (R6 guard). The
+/// original `now` is retained so the recompute lands on the SAME days, not a
+/// window re-derived from a later clock (KTD11).
+private struct CopyWatch {
+    let slots: Set<TimeSlot>
+    let rangeType: DateRangeType
+    let now: Date
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController!
@@ -68,9 +116,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcutObserver: NSObjectProtocol?
     private var recordingObservers: [NSObjectProtocol] = []
     private var calendarSelectionObserver: NSObjectProtocol?
+    private var calendarStoreObserver: NSObjectProtocol?
 
     /// Debounce: ignore clicks within 500ms of previous
     private var lastCopyTime: Date = .distantPast
+
+    // MARK: - Stale-Copy Watch + Overwrite Guard (U7)
+
+    /// The last copy's slot set + range + clock, watched for staleness (R5) and
+    /// compared by the overwrite guard (R6). In-memory only; a relaunch clears
+    /// it by design.
+    private var copyWatch: CopyWatch?
+
+    /// True after the overwrite guard has fired once for the current situation,
+    /// so the following click writes normally (R6).
+    private var confirmationPending = false
+
+    /// ~400ms trailing debounce over the bursty, payload-free EKEventStoreChanged
+    /// notification (KTD11).
+    private let staleDebouncer = TrailingDebouncer(delay: .milliseconds(400))
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppSettings.registerDefaults()
@@ -96,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeShortcutChanges()
         observeRecordingState()
         observeCalendarSelectionChanges()
+        observeCalendarStoreChanges()
 
         // User-visible launch side effects are deferred: a cold Shortcuts run
         // launches the app headless and performs the intent right away, and
@@ -159,6 +224,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let calendarSelectionObserver {
             NotificationCenter.default.removeObserver(calendarSelectionObserver)
         }
+        if let calendarStoreObserver {
+            NotificationCenter.default.removeObserver(calendarStoreObserver)
+        }
     }
 
     // MARK: - Calendar-Selection Safety (U6)
@@ -180,6 +248,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItemController.setAttention(.calendarsUnavailable)
         } else {
             statusItemController.clearAttention(ifShowing: .calendarsUnavailable)
+        }
+    }
+
+    // MARK: - Stale-Copy Watch + Overwrite Guard (U7)
+
+    /// The overwrite guard (R6, KTD10) fires only when our last write still
+    /// sits on the pasteboard AND the fresh slots differ from what we copied —
+    /// and only on the first such click; a pending confirmation means the user
+    /// already saw it, so this click writes. Pure, unit-tested without MainActor.
+    static func overwriteGuardTriggers(
+        pasteboardUnchanged: Bool,
+        slotsChanged: Bool,
+        confirmationPending: Bool
+    ) -> Bool {
+        guard !confirmationPending else { return false }
+        return pasteboardUnchanged && slotsChanged
+    }
+
+    /// A copied slot is stale once it is no longer EXACTLY among the freshly
+    /// computed slots (R5): a shrink or split drops the exact interval.
+    /// Additions never trigger it — extra fresh slots leave the watched ones
+    /// intact (subset holds). Pure.
+    static func copiedSlotsBecameStale(watched: Set<TimeSlot>, fresh: Set<TimeSlot>) -> Bool {
+        !watched.isSubset(of: fresh)
+    }
+
+    /// Records what we just copied and clears any stale badge — a new copy
+    /// replaces the watched set (R5). The pasteboard `changeCount` snapshot is
+    /// taken inside PasteboardWriter by the write itself (KTD10).
+    private func recordCopy(slots: Set<TimeSlot>, rangeType: DateRangeType, now: Date) {
+        copyWatch = CopyWatch(slots: slots, rangeType: rangeType, now: now)
+        confirmationPending = false
+        statusItemController.clearAttention(ifShowing: .copiedSlotStale)
+    }
+
+    /// Recompute-on-change watch (R5, KTD11). Same publisher the picker uses,
+    /// debounced so a sync storm collapses to one recompute.
+    private func observeCalendarStoreChanges() {
+        calendarStoreObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.staleDebouncer.schedule { [weak self] in
+                    await self?.recheckCopiedSlotsStale()
+                }
+            }
+        }
+    }
+
+    /// Recomputes the watched copy over the SAME days (its stored `now`) and
+    /// badges when any copied slot is no longer free. Additions never badge.
+    private func recheckCopiedSlotsStale() async {
+        guard let watch = copyWatch,
+              calendarService.isAuthorized,
+              !calendarService.selectedCalendars().isEmpty else { return }
+
+        let window = availabilityService.fetchWindow(for: watch.rangeType, now: watch.now)
+        let events = await calendarService.fetchEvents(from: window.start, to: window.end)
+        let fresh = availabilityService.calculateAvailability(
+            events: events, rangeType: watch.rangeType, now: watch.now
+        )
+        let freshSet = Set(fresh.values.flatMap { $0 })
+        if Self.copiedSlotsBecameStale(watched: watch.slots, fresh: freshSet) {
+            statusItemController.setAttention(.copiedSlotStale)
         }
     }
 
@@ -365,15 +497,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if slots.isEmpty {
                 statusItemController.showOutcome(.noSlots)
             } else {
+                let offered = Set(slots.values.flatMap { $0 })
+                if overwriteGuardWouldFire(against: offered) {
+                    confirmationPending = true
+                    statusItemController.showOutcome(.availabilityChanged)
+                    return
+                }
                 PasteboardWriter.write(
                     slots: slots,
                     showTimeZone: AppSettings.showTimeZone,
                     template: AppSettings.defaultFormatTemplate,
                     asOf: AppSettings.showAsOfStamp ? now : nil
                 )
+                recordCopy(slots: offered, rangeType: rangeType, now: now)
                 statusItemController.showOutcome(.copied)
             }
         }
+    }
+
+    /// Evaluates the overwrite guard for a copy about to write `offered`
+    /// against the last watched set (R6). Extracted so copyRange and
+    /// copyProposal share one call.
+    private func overwriteGuardWouldFire(against offered: Set<TimeSlot>) -> Bool {
+        let slotsChanged = copyWatch.map { $0.slots != offered } ?? false
+        return Self.overwriteGuardTriggers(
+            pasteboardUnchanged: PasteboardWriter.pasteboardHoldsOurLastWrite(),
+            slotsChanged: slotsChanged,
+            confirmationPending: confirmationPending
+        )
     }
 
     // MARK: - Proposal Mode (U4)
@@ -411,12 +562,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
+            let offered = Set(proposal)
+            if overwriteGuardWouldFire(against: offered) {
+                confirmationPending = true
+                statusItemController.showOutcome(.availabilityChanged)
+                return
+            }
+
             let text = AvailabilityFormatter().formatProposal(
                 slots: proposal,
                 showTimeZone: AppSettings.showTimeZone,
                 asOf: AppSettings.showAsOfStamp ? now : nil
             )
             PasteboardWriter.writeText(text)
+            recordCopy(slots: offered, rangeType: rangeType, now: now)
             statusItemController.showOutcome(.copied)
         }
     }
