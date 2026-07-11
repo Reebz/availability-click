@@ -1,7 +1,7 @@
 @preconcurrency import EventKit
 import Foundation
 
-enum DateRangeType {
+enum DateRangeType: Equatable {
     case thisWeek
     case businessDays(Int)
     case nextWeek
@@ -120,6 +120,30 @@ struct AvailabilityService {
         if event.isFreeAvailability { return false }
         if event.isDeclinedByCurrentUser { return false }
         return true
+    }
+
+    // MARK: - Fetch Window
+
+    /// Derives the fetch window from the same day list the availability math
+    /// will report on. A fixed window can undershoot it (an evening click or
+    /// sparse working days push the Nth business day past today+7) and a day
+    /// with no fetched events reads as fully free. Shared by the click
+    /// pipeline and the Shortcuts intent so the two can never diverge.
+    func fetchWindow(for rangeType: DateRangeType, now: Date = Date()) -> (start: Date, end: Date) {
+        let today = calendar.startOfDay(for: now)
+        let days = businessDaysForRange(
+            rangeType,
+            from: now,
+            workingDays: Set(AppSettings.workingDays)
+        )
+
+        guard let first = days.first, let last = days.last,
+              let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last)) else {
+            let fallbackEnd = calendar.date(byAdding: .day, value: 7, to: today) ?? today
+            return (today, fallbackEnd)
+        }
+
+        return (min(today, calendar.startOfDay(for: first)), end)
     }
 
     // MARK: - Date Range Calculation

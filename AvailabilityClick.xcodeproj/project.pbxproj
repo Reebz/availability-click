@@ -17,6 +17,7 @@
 		4738D4473DD427A8F6C02D28 /* AvailabilityClickApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0991CFD20B96C7D36CA04A9 /* AvailabilityClickApp.swift */; };
 		4EDCA655F151D1137B40367B /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEACB52A8D6D2A3FEABED901 /* ShortcutRecorderView.swift */; };
 		61DAA575EE41774A9F7712EB /* GlobalShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5B4D99DB879D1AABBDC26E /* GlobalShortcutManager.swift */; };
+		7410B3831AC832BEAC190D23 /* GetAvailabilityIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9591F2475B8190DD2D6521 /* GetAvailabilityIntent.swift */; };
 		7AE86B3A1A587FA4C12C9011 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 732056A73A89431D70236ADA /* StatusItemController.swift */; };
 		98117A9B39BE9A67267D9ED7 /* TimeSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D9FF7FE6F4B6C3BB42C24F /* TimeSlot.swift */; };
 		9E3B46203B285DE6C134EC81 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D452BE895B656488DFB58C4 /* AppSettings.swift */; };
@@ -39,6 +40,7 @@
 		0192A9AC472B7CADA4FA77A1 /* AvailabilityFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityFormatter.swift; sourceTree = "<group>"; };
 		03665C317735F986C65EFC38 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0B6451E7E3F47CC565A3AFFF /* AvailabilityClickTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AvailabilityClickTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0D9591F2475B8190DD2D6521 /* GetAvailabilityIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetAvailabilityIntent.swift; sourceTree = "<group>"; };
 		248446F50537B050E4760C8A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3BE46ADE5DE1313962D9B937 /* AvailabilityClick.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AvailabilityClick.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		46AE9A0A29A6E2EA167DB8D0 /* AvailabilityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityService.swift; sourceTree = "<group>"; };
@@ -133,6 +135,7 @@
 				59487AD55C94701B16B4E41D /* AvailabilityClick.entitlements */,
 				F0991CFD20B96C7D36CA04A9 /* AvailabilityClickApp.swift */,
 				03665C317735F986C65EFC38 /* Info.plist */,
+				FF2CD3439BDD3DCFBFD7AEA3 /* Intents */,
 				73596A6F94C04B466DA3650F /* Models */,
 				655A31BC61D5FEF21AA7A35E /* Services */,
 				83FF165C9136196DEEBBF5A9 /* Utilities */,
@@ -141,7 +144,15 @@
 			path = AvailabilityClick;
 			sourceTree = "<group>";
 		};
-		"TEMP_58738940-05BC-422A-B705-D0F0F44DCEF4" /* .claude */ = {
+		FF2CD3439BDD3DCFBFD7AEA3 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				0D9591F2475B8190DD2D6521 /* GetAvailabilityIntent.swift */,
+			);
+			path = Intents;
+			sourceTree = "<group>";
+		};
+		"TEMP_EEB9339B-18AE-4D63-8B9F-E12D85A6CBAC" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -241,6 +252,7 @@
 				CC5C37DF0CCAAF4B1F87EC29 /* AvailabilityService.swift in Sources */,
 				28BF0364C582B8FA1F574BFC /* CalendarPickerView.swift in Sources */,
 				28682CCDFA643BF22D6928D5 /* CalendarService.swift in Sources */,
+				7410B3831AC832BEAC190D23 /* GetAvailabilityIntent.swift in Sources */,
 				61DAA575EE41774A9F7712EB /* GlobalShortcutManager.swift in Sources */,
 				B16C142E36CAAB9B67237AE8 /* PasteboardWriter.swift in Sources */,
 				12BD38AC3BBC9939C643D03A /* PreviewPopoverView.swift in Sources */,

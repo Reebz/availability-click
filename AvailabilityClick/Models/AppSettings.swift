@@ -91,6 +91,12 @@ enum AppSettings {
         UserDefaults.standard.string(forKey: defaultRangeModeKey) ?? "businessDays"
     }
 
+    /// The configured default range, shared by the click pipeline and the
+    /// Shortcuts intent's "Default range" parameter.
+    static var defaultRangeType: DateRangeType {
+        defaultRangeMode == "thisWeek" ? .thisWeek : .businessDays(defaultBusinessDays)
+    }
+
     static var showTimeZone: Bool {
         UserDefaults.standard.bool(forKey: showTimeZoneKey)
     }

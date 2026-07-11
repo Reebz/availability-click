@@ -63,6 +63,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeShortcutChanges()
         observeRecordingState()
 
+        // User-visible launch side effects are deferred: a cold Shortcuts run
+        // launches the app headless and performs the intent right away, and
+        // unattended runs must never pop the permission sheet (OQ10). The
+        // intent marks the launch before this fires.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.runUserVisibleLaunchSideEffects()
+        }
+    }
+
+    /// Set by GetAvailabilityIntent so a headless Shortcuts-driven launch
+    /// skips the TCC auto-request (and the first-run coach).
+    static var intentDidRunThisLaunch = false
+
+    private func runUserVisibleLaunchSideEffects() {
+        guard !Self.intentDidRunThisLaunch else { return }
+
         // Request calendar access on first launch
         Task {
             if calendarService.authorizationStatus == .notDetermined {
@@ -179,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            let dateRange = calculateDateRange(for: rangeType)
+            let dateRange = availabilityService.fetchWindow(for: rangeType)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
 
             let slots = availabilityService.calculateAvailability(
@@ -198,10 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Copy Pipeline
 
     private var defaultRangeType: DateRangeType {
-        if AppSettings.defaultRangeMode == "thisWeek" {
-            return .thisWeek
-        }
-        return .businessDays(AppSettings.defaultBusinessDays)
+        AppSettings.defaultRangeType
     }
 
     private func copyDefault() {
@@ -244,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            let dateRange = calculateDateRange(for: rangeType)
+            let dateRange = availabilityService.fetchWindow(for: rangeType, now: now)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
 
             let slots = availabilityService.calculateAvailability(
@@ -264,32 +278,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusItemController.showOutcome(.copied)
             }
         }
-    }
-
-    // MARK: - Date Range Calculation
-
-    private func calculateDateRange(for rangeType: DateRangeType) -> (start: Date, end: Date) {
-        let cal = Calendar.current
-        let now = Date()
-        let today = cal.startOfDay(for: now)
-
-        // Derive the fetch window from the same day list the availability math
-        // will report on. A fixed window can undershoot it (an evening click or
-        // sparse working days push the Nth business day past today+7) and a day
-        // with no fetched events reads as fully free.
-        let days = availabilityService.businessDaysForRange(
-            rangeType,
-            from: now,
-            workingDays: Set(AppSettings.workingDays)
-        )
-
-        guard let first = days.first, let last = days.last,
-              let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: last)) else {
-            let fallbackEnd = cal.date(byAdding: .day, value: 7, to: today) ?? today
-            return (today, fallbackEnd)
-        }
-
-        return (min(today, cal.startOfDay(for: first)), end)
     }
 
     // MARK: - Permission

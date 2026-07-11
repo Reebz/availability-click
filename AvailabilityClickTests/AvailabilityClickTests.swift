@@ -1067,6 +1067,60 @@ struct DateFromMinutesTests {
 }
 
 // ============================================================================
+// MARK: - App Intent Mapping Tests (KTD6)
+// ============================================================================
+
+@Suite("App Intent Mapping", .serialized)
+struct AppIntentMappingTests {
+    @Test func explicitRanges_mapToMenuEquivalents() {
+        #expect(AvailabilityRange.nextWeek.dateRangeType == .nextWeek)
+        #expect(AvailabilityRange.nextFortnight.dateRangeType == .nextFortnight)
+        #expect(AvailabilityRange.next30Days.dateRangeType == .next30Days)
+    }
+
+    @Test func defaultRange_followsBusinessDaysSetting() {
+        withPinnedSettings([
+            AppSettings.defaultRangeModeKey: "businessDays",
+            AppSettings.defaultBusinessDaysKey: 7,
+        ]) {
+            #expect(AvailabilityRange.defaultRange.dateRangeType == .businessDays(7))
+        }
+    }
+
+    @Test func defaultRange_followsThisWeekSetting() {
+        withPinnedSettings([AppSettings.defaultRangeModeKey: "thisWeek"]) {
+            #expect(AvailabilityRange.defaultRange.dateRangeType == .thisWeek)
+        }
+    }
+
+    @Test func fetchWindow_coversSameDayListAsAvailabilityMath() {
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        withPinnedSettings(pinned) {
+            let service = AvailabilityService()
+            let wedNoon = date(2026, 3, 25, 12)
+            let window = service.fetchWindow(for: .businessDays(3), now: wedNoon)
+            let days = service.businessDaysForRange(
+                .businessDays(3), from: wedNoon, workingDays: [2, 3, 4, 5, 6]
+            )
+            #expect(window.start == cal.startOfDay(for: wedNoon))
+            #expect(window.end == cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: days.last!)))
+        }
+    }
+
+    @Test func fetchWindow_emptyDayList_fallsBackToOneWeek() {
+        withPinnedSettings([AppSettings.workingDaysKey: [Int]()]) {
+            let service = AvailabilityService()
+            let wedNoon = date(2026, 3, 25, 12)
+            let window = service.fetchWindow(for: .businessDays(3), now: wedNoon)
+            let today = cal.startOfDay(for: wedNoon)
+            #expect(window.start == today)
+            #expect(window.end == cal.date(byAdding: .day, value: 7, to: today))
+        }
+    }
+}
+
+// ============================================================================
 // MARK: - Locale-Aware Formatting Tests (KTD5/OQ8)
 // ============================================================================
 
