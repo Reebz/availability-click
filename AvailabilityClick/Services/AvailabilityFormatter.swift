@@ -36,7 +36,8 @@ struct AvailabilityFormatter {
         slots: [Date: [TimeSlot]],
         showTimeZone: Bool = false,
         template: FormatTemplate = .plainText,
-        timezone: TimeZone? = nil
+        timezone: TimeZone? = nil,
+        asOf: Date? = nil
     ) -> String {
         guard !slots.isEmpty else { return "" }
 
@@ -55,6 +56,9 @@ struct AvailabilityFormatter {
         if showTimeZone {
             lines.append("(\(Self.timezoneString(for: timezone)))")
         }
+        if let asOf {
+            lines.append(asOfLine(asOf, timezone: timezone))
+        }
 
         return lines.joined(separator: "\n")
     }
@@ -65,7 +69,8 @@ struct AvailabilityFormatter {
     func formatAttributed(
         slots: [Date: [TimeSlot]],
         showTimeZone: Bool = false,
-        timezone: TimeZone? = nil
+        timezone: TimeZone? = nil,
+        asOf: Date? = nil
     ) -> NSAttributedString {
         guard !slots.isEmpty else { return NSAttributedString() }
 
@@ -89,8 +94,45 @@ struct AvailabilityFormatter {
                 attributes: plain
             ))
         }
+        if let asOf {
+            result.append(NSAttributedString(
+                string: "\n\(asOfLine(asOf, timezone: timezone))",
+                attributes: plain
+            ))
+        }
 
         return result
+    }
+
+    // MARK: - As-Of Stamp
+
+    /// The optional issuance stamp appended as the final line (R4): "(as of
+    /// <date>, <time>)" in the formatter's locale and the effective (recipient
+    /// or system) timezone, so it reads consistently with the slot times above
+    /// it. Both renderers call this so they can't drift.
+    ///
+    /// Date and time are formatted separately and joined with an explicit ", "
+    /// rather than a combined date+time style: the OS-chosen join drifts
+    /// between " at " and "," across macOS versions (CI is macOS 15, dev is
+    /// newer), which would make golden strings version-dependent. The
+    /// narrow/no-break spaces some locales insert before AM/PM are normalized
+    /// to a plain space for the same reason and for cleaner pasted text.
+    private func asOfLine(_ date: Date, timezone: TimeZone?) -> String {
+        let tz = timezone ?? TimeZone.current
+        let dateF = DateFormatter()
+        dateF.locale = locale
+        dateF.timeZone = tz
+        dateF.dateStyle = .medium
+        dateF.timeStyle = .none
+        let timeF = DateFormatter()
+        timeF.locale = locale
+        timeF.timeZone = tz
+        timeF.dateStyle = .none
+        timeF.timeStyle = .short
+        let stamp = "\(dateF.string(from: date)), \(timeF.string(from: date))"
+            .replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+        return "(as of \(stamp))"
     }
 
     // MARK: - Shared Line Building

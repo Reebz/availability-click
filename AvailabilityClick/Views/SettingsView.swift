@@ -25,6 +25,9 @@ struct SettingsView: View {
     @AppStorage(AppSettings.showTimeZoneKey)
     private var showTimeZone = false
 
+    @AppStorage(AppSettings.showAsOfStampKey)
+    private var showAsOfStamp = false
+
     @AppStorage(AppSettings.launchAtLoginKey)
     private var launchAtLogin = false
 
@@ -242,6 +245,8 @@ struct SettingsView: View {
                     "Append time zone (\(timezoneLabel))",
                     isOn: $showTimeZone
                 )
+
+                Toggle("Append \"as of\" date & time", isOn: $showAsOfStamp)
 
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in

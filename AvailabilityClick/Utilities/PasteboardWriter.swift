@@ -16,6 +16,7 @@ enum PasteboardWriter {
         timezone: TimeZone? = nil,
         template: FormatTemplate,
         locale: Locale = .autoupdatingCurrent,
+        asOf: Date? = nil,
         pasteboard: NSPasteboard = .general
     ) -> Bool {
         let formatter = AvailabilityFormatter(locale: locale)
@@ -23,7 +24,8 @@ enum PasteboardWriter {
             slots: slots,
             showTimeZone: showTimeZone,
             template: template,
-            timezone: timezone
+            timezone: timezone,
+            asOf: asOf
         )
         guard !plain.isEmpty else { return false }
 
@@ -33,7 +35,8 @@ enum PasteboardWriter {
             let attributed = formatter.formatAttributed(
                 slots: slots,
                 showTimeZone: showTimeZone,
-                timezone: timezone
+                timezone: timezone,
+                asOf: asOf
             )
             let fullRange = NSRange(location: 0, length: attributed.length)
             if let rtf = try? attributed.data(

@@ -1586,6 +1586,22 @@ struct PasteboardWriterTests {
         #expect(html.contains("10-11am"))
     }
 
+    @Test func asOfStamp_passesThroughToAllFlavors() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let instant = utc.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 18))!
+        let pb = testPasteboard()
+        PasteboardWriter.write(
+            slots: sampleSlots, showTimeZone: false,
+            timezone: TimeZone(identifier: "America/New_York"),
+            template: .plainText, locale: enUS, asOf: instant, pasteboard: pb
+        )
+        #expect(pb.string(forType: .string)?.hasSuffix("(as of Mar 25, 2026, 2:00 PM)") == true)
+        let rtf = try #require(pb.data(forType: .rtf))
+        let attributed = try #require(NSAttributedString(rtf: rtf, documentAttributes: nil))
+        #expect(attributed.string.contains("(as of Mar 25, 2026, 2:00 PM)"))
+    }
+
     @Test func emptySlots_writesNothing_pasteboardUntouched() {
         let pb = testPasteboard()
         pb.clearContents()
@@ -2129,5 +2145,57 @@ struct TimezoneLabelTests {
         #expect(attrLast == plainLast)
         #expect(plainLast.hasPrefix("(") && plainLast.hasSuffix(")"))
         #expect(offsetTokenCount(plainLast) == 1)
+    }
+}
+
+// ============================================================================
+// MARK: - As-Of Stamp Tests (U3/R4)
+// ============================================================================
+
+@Suite("As-Of Stamp")
+struct AsOfStampTests {
+    let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
+
+    /// Fixture instant: 2026-03-25 18:00:00 UTC (= 2:00 PM EDT in New York).
+    private var instant: Date {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        return utc.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 18))!
+    }
+    private var slots: [Date: [TimeSlot]] {
+        [date(2026, 3, 25): [slot(25, 9, 0, 10, 0)]]
+    }
+
+    @Test func stampOff_outputByteIdenticalToPreU3() {
+        #expect(formatter.format(slots: slots) == "Wed Mar 25: 9-10am")
+    }
+
+    @Test func stampOn_lastLineIsAsOf_enUSGolden() {
+        let out = formatter.format(
+            slots: slots, timezone: TimeZone(identifier: "America/New_York"), asOf: instant
+        )
+        #expect(out.split(separator: "\n").map(String.init).last == "(as of Mar 25, 2026, 2:00 PM)")
+    }
+
+    @Test func stampAndTimezone_orderDaysThenZoneThenStamp_bothRenderers() {
+        let ny = TimeZone(identifier: "America/New_York")!
+        let plain = formatter.format(slots: slots, showTimeZone: true, timezone: ny, asOf: instant)
+        let lines = plain.split(separator: "\n").map(String.init)
+        #expect(lines.count == 3)
+        #expect(!lines[0].hasPrefix("("))                                 // day line
+        #expect(lines[1].hasPrefix("(") && lines[1].contains("GMT") && !lines[1].hasPrefix("(as of"))  // zone line
+        #expect(lines[2] == "(as of Mar 25, 2026, 2:00 PM)")             // stamp line
+        // Attributed renderer must carry the identical trailing lines.
+        let attr = formatter.formatAttributed(slots: slots, showTimeZone: true, timezone: ny, asOf: instant)
+        #expect(attr.string == plain)
+    }
+
+    @Test func stampFollowsRecipientTimezone() {
+        let ny = formatter.format(slots: slots, timezone: TimeZone(identifier: "America/New_York"), asOf: instant)
+            .split(separator: "\n").map(String.init).last
+        let la = formatter.format(slots: slots, timezone: TimeZone(identifier: "America/Los_Angeles"), asOf: instant)
+            .split(separator: "\n").map(String.init).last
+        #expect(ny == "(as of Mar 25, 2026, 2:00 PM)")
+        #expect(la == "(as of Mar 25, 2026, 11:00 AM)")  // 18:00 UTC = 11:00 PDT
     }
 }

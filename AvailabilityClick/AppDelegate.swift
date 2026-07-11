@@ -307,7 +307,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 PasteboardWriter.write(
                     slots: slots,
                     showTimeZone: AppSettings.showTimeZone,
-                    template: AppSettings.defaultFormatTemplate
+                    template: AppSettings.defaultFormatTemplate,
+                    asOf: AppSettings.showAsOfStamp ? now : nil
                 )
                 statusItemController.showOutcome(.copied)
             }

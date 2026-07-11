@@ -22,6 +22,7 @@ enum AppSettings {
 
     // V1.2 keys
     static let eventBufferMinutesKey = "eventBufferMinutes"
+    static let showAsOfStampKey = "showAsOfStamp"
 
     // Defaults
     static let defaultWorkingHoursStart = 540   // 9:00 AM
@@ -59,6 +60,7 @@ enum AppSettings {
             globalShortcutKey: [String: Int](),
             hasShownCoachmarkKey: false,
             eventBufferMinutesKey: defaultEventBuffer,
+            showAsOfStampKey: false,
         ])
     }
 
@@ -163,5 +165,11 @@ enum AppSettings {
     static var eventBufferMinutes: Int {
         let value = UserDefaults.standard.integer(forKey: eventBufferMinutesKey)
         return validEventBufferValues.contains(value) ? value : defaultEventBuffer
+    }
+
+    /// Appends an "(as of <date, time>)" final line to copied output (R4).
+    /// Off by default; a bool read needs no allowlist.
+    static var showAsOfStamp: Bool {
+        UserDefaults.standard.bool(forKey: showAsOfStampKey)
     }
 }

@@ -71,7 +71,8 @@ struct PreviewPopoverView: View {
                         slots: slots,
                         showTimeZone: true,
                         timezone: selectedTimezone,
-                        template: selectedFormat
+                        template: selectedFormat,
+                        asOf: AppSettings.showAsOfStamp ? Date() : nil
                     )
                     onCopy()
                 }
