@@ -21,6 +21,12 @@ struct CalendarPickerView: View {
                     .foregroundStyle(.secondary)
                     .font(.callout)
             } else {
+                if isAllStale {
+                    Text("Your selected calendars are no longer available — pick calendars to resume.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 LazyVGrid(
                     columns: [
                         GridItem(.flexible(), alignment: .topLeading),
@@ -77,7 +83,23 @@ struct CalendarPickerView: View {
         allIDs: [String]
     ) -> Set<String>? {
         let allSet = Set(allIDs)
-        var selection = current.intersection(allSet).isEmpty ? allSet : current
+        let valid = current.intersection(allSet)
+
+        let base: Set<String>
+        if current.isEmpty {
+            // Never customized: first touch materializes the full set so
+            // unchecking one leaves the rest.
+            base = allSet
+        } else if valid.isEmpty {
+            // Customized but every saved ID is stale (R11 recovery): start from
+            // an empty selection so re-picking adds ONLY the toggled calendar
+            // and never silently re-selects all.
+            base = []
+        } else {
+            base = valid
+        }
+
+        var selection = base
         if isOn {
             selection.insert(id)
         } else {
@@ -87,12 +109,22 @@ struct CalendarPickerView: View {
         return selection
     }
 
+    /// True when the stored selection is customized but every ID is stale (R11)
+    /// -- drives the explanatory notice, distinct from the never-customized
+    /// state which also renders unchecked but needs no notice.
+    private var isAllStale: Bool {
+        CalendarService.selectionIsAllStale(
+            saved: Array(selectedIDs),
+            allIDs: calendars.map(\.calendarIdentifier)
+        )
+    }
+
     private func binding(for id: String) -> Binding<Bool> {
         Binding(
             get: {
-                // Mirror the read path exactly: an all-stale stored set
-                // resolves to "all calendars", so the checkboxes must show
-                // all checked -- not zero checked while copies use all.
+                // Mirror the read path exactly: never-customized resolves to
+                // "all" (all checked); an all-stale set resolves to empty (all
+                // unchecked, with the notice above prompting a re-pick).
                 CalendarService.effectiveSelectedIDs(
                     saved: Array(selectedIDs),
                     allIDs: calendars.map(\.calendarIdentifier)
@@ -110,6 +142,8 @@ struct CalendarPickerView: View {
                 }
                 selectedIDs = updated
                 UserDefaults.standard.set(Array(updated), forKey: AppSettings.selectedCalendarIDsKey)
+                // Let the app re-evaluate the persistent unavailable badge (R11).
+                NotificationCenter.default.post(name: .calendarSelectionChanged, object: nil)
             }
         )
     }

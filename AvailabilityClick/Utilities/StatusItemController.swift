@@ -393,6 +393,13 @@ final class StatusItemController: NSObject {
     func clearAttention() {
         setAttention(.none)
     }
+
+    /// Clears the badge only when it currently shows `state`, so recovering one
+    /// condition never wipes an unrelated badge (e.g. a re-pick clearing the
+    /// calendars-unavailable badge must not erase a stale-copy badge).
+    func clearAttention(ifShowing state: AttentionState) {
+        if attentionState == state { clearAttention() }
+    }
 }
 
 /// One-time gesture coach shown under the status item (R11).

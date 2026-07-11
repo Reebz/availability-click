@@ -1680,9 +1680,19 @@ struct CalendarSelectionTests {
         #expect(result == ["work"])
     }
 
-    @Test func allStaleIDs_fallsBackToAllCalendars() {
+    @Test func allStaleIDs_resolvesEmpty_neverWidensToAll() {
+        // KTD12: a customized-but-all-stale set computes from NO calendars,
+        // never silently widening back to all.
         let result = CalendarService.effectiveSelectedIDs(saved: ["deleted-1", "deleted-2"], allIDs: allIDs)
-        #expect(result == Set(allIDs))
+        #expect(result.isEmpty)
+    }
+
+    @Test func selectionIsAllStale_matrix() {
+        #expect(!CalendarService.selectionIsAllStale(saved: [], allIDs: allIDs))                    // never customized
+        #expect(!CalendarService.selectionIsAllStale(saved: ["work"], allIDs: allIDs))              // valid
+        #expect(!CalendarService.selectionIsAllStale(saved: ["work", "deleted"], allIDs: allIDs))   // partially stale
+        #expect(CalendarService.selectionIsAllStale(saved: ["deleted-1", "deleted-2"], allIDs: allIDs)) // all stale
+        #expect(!CalendarService.selectionIsAllStale(saved: ["work"], allIDs: []))                  // empty store
     }
 
     @Test func partiallyStaleIDs_keepsValidOnly() {
@@ -1751,13 +1761,13 @@ struct CalendarSelectionTests {
         #expect(result == nil)
     }
 
-    @Test func allStaleStoredSet_behavesAsAllSelected() {
-        // All-stale resolves to "all calendars" on the read path; the write
-        // path must expand the same way, so one uncheck yields all-minus-one.
+    @Test func rePickFromAllStale_selectsOnlyToggledCalendar() {
+        // All-stale recovery (KTD12): checking one calendar selects ONLY it,
+        // never silently expanding to all.
         let result = CalendarPickerView.updatedSelection(
-            togglingID: "home", isOn: false, current: ["deleted-1", "deleted-2"], allIDs: allIDs
+            togglingID: "home", isOn: true, current: ["deleted-1", "deleted-2"], allIDs: allIDs
         )
-        #expect(result == ["work", "shared"])
+        #expect(result == ["home"])
     }
 }
 
@@ -1888,6 +1898,16 @@ struct AttentionStateTests {
         let stale = StatusItemController.attentionSymbolImage(for: .copiedSlotStale)
         #expect(cal != nil && cal?.isTemplate == true)
         #expect(stale != nil && stale?.isTemplate == true)
+    }
+
+    @Test func clearIfShowing_onlyClearsMatchingState() {
+        let c = StatusItemController()
+        c.setAttention(.copiedSlotStale)
+        // Recovering calendars must not wipe an unrelated stale-copy badge.
+        c.clearAttention(ifShowing: .calendarsUnavailable)
+        #expect(c.attentionState == .copiedSlotStale)
+        c.clearAttention(ifShowing: .copiedSlotStale)
+        #expect(c.attentionState == .none)
     }
 }
 

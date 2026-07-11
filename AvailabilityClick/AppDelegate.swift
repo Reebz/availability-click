@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcutManager: GlobalShortcutManager!
     private var shortcutObserver: NSObjectProtocol?
     private var recordingObservers: [NSObjectProtocol] = []
+    private var calendarSelectionObserver: NSObjectProtocol?
 
     /// Debounce: ignore clicks within 500ms of previous
     private var lastCopyTime: Date = .distantPast
@@ -94,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerSavedShortcut()
         observeShortcutChanges()
         observeRecordingState()
+        observeCalendarSelectionChanges()
 
         // User-visible launch side effects are deferred: a cold Shortcuts run
         // launches the app headless and performs the intent right away, and
@@ -154,6 +156,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         recordingObservers = []
+        if let calendarSelectionObserver {
+            NotificationCenter.default.removeObserver(calendarSelectionObserver)
+        }
+    }
+
+    // MARK: - Calendar-Selection Safety (U6)
+
+    /// Re-evaluate the persistent calendars-unavailable badge whenever the user
+    /// re-picks in Settings, so recovery clears the notice (R11).
+    private func observeCalendarSelectionChanges() {
+        calendarSelectionObserver = NotificationCenter.default.addObserver(
+            forName: .calendarSelectionChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshCalendarAttention() }
+        }
+    }
+
+    /// Sets the calendars-unavailable badge when every saved calendar is stale,
+    /// clears it on recovery. Targeted so it never disturbs a stale-copy badge.
+    private func refreshCalendarAttention() {
+        if calendarService.savedSelectionIsAllStale {
+            statusItemController.setAttention(.calendarsUnavailable)
+        } else {
+            statusItemController.clearAttention(ifShowing: .calendarsUnavailable)
+        }
     }
 
     // MARK: - Keyboard Shortcut
@@ -258,6 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let rangeType = defaultRangeType
 
         Task { @MainActor in
+            refreshCalendarAttention()
             guard !calendarService.selectedCalendars().isEmpty else {
                 statusItemController.showOutcome(.noCalendars)
                 return
@@ -319,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastCopyTime = now
 
         Task { @MainActor in
+            refreshCalendarAttention()
             guard !calendarService.selectedCalendars().isEmpty else {
                 statusItemController.showOutcome(.noCalendars)
                 return
@@ -363,6 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastCopyTime = now
 
         Task { @MainActor in
+            refreshCalendarAttention()
             guard !calendarService.selectedCalendars().isEmpty else {
                 statusItemController.showOutcome(.noCalendars)
                 return

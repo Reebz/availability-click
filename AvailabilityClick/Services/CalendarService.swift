@@ -1,5 +1,12 @@
 @preconcurrency import EventKit
+import Foundation
 import os
+
+extension Notification.Name {
+    /// Posted by the calendar picker when the user changes their selection, so
+    /// the app can re-evaluate the persistent calendars-unavailable badge (R11).
+    static let calendarSelectionChanged = Notification.Name("AvailabilityClick.calendarSelectionChanged")
+}
 
 /// Carries a non-Sendable value across an isolation boundary the surrounding
 /// code has independently verified safe (documented-thread-safe EventKit
@@ -55,18 +62,37 @@ final class CalendarService {
         return all.filter { effective.contains($0.calendarIdentifier) }
     }
 
-    /// Selection resolution (KTD2), extracted pure so it is unit-testable:
-    /// `[]` means "never customized = all calendars"; a saved set whose IDs
-    /// are all stale also falls back to all calendars. Nonisolated: pure
-    /// function, also called from the picker's binding getter.
+    /// Selection resolution (KTD2/KTD12), extracted pure so it is
+    /// unit-testable. Nonisolated: pure function, also called from the picker's
+    /// binding getter.
+    ///
+    /// `[]` (never customized) = all calendars, the first-run behavior. A
+    /// customized set is honored intersected with what still exists; when every
+    /// saved ID is stale that intersection is EMPTY -- the app then computes
+    /// from NO calendars and shows a persistent notice rather than silently
+    /// widening back to all (R11). The two empty-ish cases must stay distinct
+    /// or first-run breaks.
     nonisolated static func effectiveSelectedIDs(saved: [String], allIDs: [String]) -> Set<String> {
         let savedSet = Set(saved)
         if savedSet.isEmpty { return Set(allIDs) }
+        return savedSet.intersection(allIDs)
+    }
 
-        let valid = savedSet.intersection(allIDs)
-        if valid.isEmpty && !allIDs.isEmpty { return Set(allIDs) }
+    /// True when the user customized their selection but every saved ID is now
+    /// stale (deleted or offline account) -- distinct from an empty store and
+    /// from the never-customized first-run state. Drives the persistent
+    /// calendars-unavailable badge and the picker notice (R11). Pure.
+    nonisolated static func selectionIsAllStale(saved: [String], allIDs: [String]) -> Bool {
+        guard !saved.isEmpty, !allIDs.isEmpty else { return false }
+        return Set(saved).isDisjoint(with: allIDs)
+    }
 
-        return valid
+    /// `selectionIsAllStale` over the live settings and store.
+    var savedSelectionIsAllStale: Bool {
+        Self.selectionIsAllStale(
+            saved: AppSettings.selectedCalendarIDs,
+            allIDs: allCalendars.map(\.calendarIdentifier)
+        )
     }
 
     // MARK: - Event Fetching
