@@ -237,7 +237,11 @@ final class StatusItemController: NSObject {
 
     private var previewSafetyTimer: Timer?
 
-    func showPreviewPopover(slots: [Date: [TimeSlot]], holdInitiated: Bool = false) {
+    func showPreviewPopover(
+        slots: [Date: [TimeSlot]],
+        holdInitiated: Bool = false,
+        onCopied: (() -> Void)? = nil
+    ) {
         // Dismiss existing popover
         dismissPreviewPopover()
 
@@ -245,10 +249,12 @@ final class StatusItemController: NSObject {
             slots: slots,
             // The popover writes the pasteboard itself (PasteboardWriter with
             // its selected timezone/template) so rich flavors match what the
-            // user previewed; this callback is just close-and-flash.
+            // user previewed; this callback closes, flashes, and lets the
+            // owner record the copy for the stale-watch/overwrite-guard (U7).
             onCopy: { [weak self] in
                 self?.dismissPreviewPopover()
                 self?.showOutcome(.copied)
+                onCopied?()
             },
             onDismiss: { [weak self] in
                 self?.dismissPreviewPopover()

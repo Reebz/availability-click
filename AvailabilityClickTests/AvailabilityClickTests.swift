@@ -2650,6 +2650,17 @@ struct StaleWatchGuardTests {
         #expect(!AppDelegate.overwriteGuardTriggers(pasteboardUnchanged: true, slotsChanged: true, confirmationPending: true))
     }
 
+    @Test func slotsDiffer_trueOnlyWhenSameRangeDifferentSlots() {
+        // Regression: the guard used to compare slots ignoring the range, so
+        // switching ranges tripped a false "availability changed" confirmation.
+        let a: Set<TimeSlot> = [slot(25, 9, 0, 10, 0)]
+        let b: Set<TimeSlot> = [slot(25, 14, 0, 15, 0)]
+        #expect(AppDelegate.overwriteGuardSlotsDiffer(watchedRange: .nextWeek, watchedSlots: a, range: .nextWeek, offered: b))
+        #expect(!AppDelegate.overwriteGuardSlotsDiffer(watchedRange: .nextWeek, watchedSlots: a, range: .nextWeek, offered: a))
+        #expect(!AppDelegate.overwriteGuardSlotsDiffer(watchedRange: .nextWeek, watchedSlots: a, range: .next30Days, offered: b))
+        #expect(!AppDelegate.overwriteGuardSlotsDiffer(watchedRange: nil, watchedSlots: nil, range: .nextWeek, offered: b))
+    }
+
     // MARK: - Stale comparison (R5)
 
     @Test func stale_whenCopiedSlotDisappears() {

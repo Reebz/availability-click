@@ -175,6 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// it by design.
     private var copyWatch: CopyWatch?
 
+    /// Bumped on every recorded copy so an in-flight stale recheck that started
+    /// against an older copy bails out after its await instead of re-badging a
+    /// superseded set (R5 "next copy clears").
+    private var copyWatchGeneration = 0
+
     /// True after the overwrite guard has fired once for the current situation,
     /// so the following click writes normally (R6).
     private var confirmationPending = false
@@ -322,6 +327,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return pasteboardUnchanged && slotsChanged
     }
 
+    /// The guard's "availability changed" input (R6). It is true only when this
+    /// copy is the SAME range as the watched copy AND its slots differ —
+    /// switching to a different range or the proposal is a deliberate new copy,
+    /// not a silent clobber, so it must not trip the confirmation. Pure.
+    static func overwriteGuardSlotsDiffer(
+        watchedRange: DateRangeType?,
+        watchedSlots: Set<TimeSlot>?,
+        range: DateRangeType,
+        offered: Set<TimeSlot>
+    ) -> Bool {
+        guard let watchedRange, let watchedSlots else { return false }
+        return watchedRange == range && watchedSlots != offered
+    }
+
     /// A copied slot is stale once it is no longer EXACTLY among the freshly
     /// computed slots (R5): a shrink or split drops the exact interval.
     /// Additions never trigger it — extra fresh slots leave the watched ones
@@ -335,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// taken inside PasteboardWriter by the write itself (KTD10).
     private func recordCopy(slots: Set<TimeSlot>, rangeType: DateRangeType, now: Date) {
         copyWatch = CopyWatch(slots: slots, rangeType: rangeType, now: now)
+        copyWatchGeneration += 1
         confirmationPending = false
         statusItemController.clearAttention(ifShowing: .copiedSlotStale)
     }
@@ -360,8 +380,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               calendarService.isAuthorized,
               !calendarService.selectedCalendars().isEmpty else { return }
 
+        let generation = copyWatchGeneration
         let window = availabilityService.fetchWindow(for: watch.rangeType, now: watch.now)
         let events = await calendarService.fetchEvents(from: window.start, to: window.end)
+        // A copy that landed during the fetch superseded this watch and already
+        // cleared the badge; don't re-badge the old set (R5 "next copy clears").
+        guard generation == copyWatchGeneration else { return }
+
         let fresh = availabilityService.calculateAvailability(
             events: events, rangeType: watch.rangeType, now: watch.now
         )
@@ -518,14 +543,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            let dateRange = availabilityService.fetchWindow(for: rangeType)
+            let now = Date()
+            let dateRange = availabilityService.fetchWindow(for: rangeType, now: now)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
-            let slots = availabilityService.calculateAvailability(events: events, rangeType: rangeType)
+            let slots = availabilityService.calculateAvailability(events: events, rangeType: rangeType, now: now)
 
             if slots.isEmpty {
                 statusItemController.showOutcome(.noSlots)
             } else {
-                statusItemController.showPreviewPopover(slots: slots, holdInitiated: holdInitiated)
+                let offered = Set(slots.values.flatMap { $0 })
+                statusItemController.showPreviewPopover(slots: slots, holdInitiated: holdInitiated) { [weak self] in
+                    // The preview's Copy is the app's own output: record it so a
+                    // later booking badges it (R5) and the next click can't
+                    // silently clobber it (R6).
+                    self?.recordCopy(slots: offered, rangeType: rangeType, now: now)
+                }
             }
         }
     }
@@ -589,7 +621,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusItemController.showOutcome(.noSlots)
             } else {
                 let offered = Set(slots.values.flatMap { $0 })
-                if overwriteGuardWouldFire(against: offered) {
+                if overwriteGuardWouldFire(against: offered, rangeType: rangeType) {
                     confirmationPending = true
                     statusItemController.showOutcome(.availabilityChanged)
                     return
@@ -609,8 +641,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Evaluates the overwrite guard for a copy about to write `offered`
     /// against the last watched set (R6). Extracted so copyRange and
     /// copyProposal share one call.
-    private func overwriteGuardWouldFire(against offered: Set<TimeSlot>) -> Bool {
-        let slotsChanged = copyWatch.map { $0.slots != offered } ?? false
+    private func overwriteGuardWouldFire(against offered: Set<TimeSlot>, rangeType: DateRangeType) -> Bool {
+        let slotsChanged = Self.overwriteGuardSlotsDiffer(
+            watchedRange: copyWatch?.rangeType,
+            watchedSlots: copyWatch?.slots,
+            range: rangeType,
+            offered: offered
+        )
         return Self.overwriteGuardTriggers(
             pasteboardUnchanged: PasteboardWriter.pasteboardHoldsOurLastWrite(),
             slotsChanged: slotsChanged,
@@ -654,7 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             let offered = Set(proposal)
-            if overwriteGuardWouldFire(against: offered) {
+            if overwriteGuardWouldFire(against: offered, rangeType: rangeType) {
                 confirmationPending = true
                 statusItemController.showOutcome(.availabilityChanged)
                 return
