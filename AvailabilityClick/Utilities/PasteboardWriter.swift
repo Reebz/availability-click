@@ -15,9 +15,10 @@ enum PasteboardWriter {
         showTimeZone: Bool,
         timezone: TimeZone? = nil,
         template: FormatTemplate,
+        locale: Locale = .autoupdatingCurrent,
         pasteboard: NSPasteboard = .general
     ) -> Bool {
-        let formatter = AvailabilityFormatter()
+        let formatter = AvailabilityFormatter(locale: locale)
         let plain = formatter.format(
             slots: slots,
             showTimeZone: showTimeZone,

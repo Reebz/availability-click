@@ -73,7 +73,8 @@ struct TimeSlotTests {
 
 @Suite("AvailabilityFormatter")
 struct FormatterTests {
-    let formatter = AvailabilityFormatter()
+    // Pinned locale: golden strings are en_US byte-exact (KTD5/OQ8).
+    let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
 
     // MARK: - Time Range: AM/PM Suffix Elision
 
@@ -680,7 +681,7 @@ struct AvailabilityCalculationTests {
 
 @Suite("Timezone Day Labels")
 struct TimezoneDayLabelTests {
-    let formatter = AvailabilityFormatter()
+    let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
 
     // Regression: recipient-timezone output used to convert times but keep
     // sender-local day labels, pairing a converted evening time with the
@@ -1066,12 +1067,101 @@ struct DateFromMinutesTests {
 }
 
 // ============================================================================
+// MARK: - Locale-Aware Formatting Tests (KTD5/OQ8)
+// ============================================================================
+
+@Suite("Locale-Aware Formatting")
+struct LocaleFormattingTests {
+    private let enUS = Locale(identifier: "en_US")
+
+    /// en_US names and label order with a forced 24-hour cycle -- fully
+    /// deterministic regardless of the machine locale.
+    private var forced24: Locale {
+        var components = Locale.Components(identifier: "en_US")
+        components.hourCycle = .zeroToTwentyThree
+        return Locale(components: components)
+    }
+
+    @Test func enUS_reproducesGoldenOutput() {
+        let formatter = AvailabilityFormatter(locale: enUS)
+        let slots = [date(2026, 3, 25): [slot(25, 9, 0, 10, 30), slot(25, 14, 0, 15, 0)]]
+        #expect(formatter.format(slots: slots) == "Wed Mar 25: 9-10:30am, 2-3pm")
+    }
+
+    @Test func forced24h_onTheHour_noPeriodsNoElision() {
+        let formatter = AvailabilityFormatter(locale: forced24)
+        #expect(formatter.formatTimeRange(slot(25, 14, 0, 15, 0)) == "14-15")
+    }
+
+    @Test func forced24h_withMinutes_bothSidesCarryMinutes() {
+        let formatter = AvailabilityFormatter(locale: forced24)
+        #expect(formatter.formatTimeRange(slot(25, 14, 30, 16, 0)) == "14:30-16:00")
+        #expect(formatter.formatTimeRange(slot(25, 9, 0, 10, 45)) == "9:00-10:45")
+    }
+
+    @Test func forced24h_crossNoon() {
+        let formatter = AvailabilityFormatter(locale: forced24)
+        #expect(formatter.formatTimeRange(slot(25, 9, 0, 14, 0)) == "9-14")
+    }
+
+    @Test func forced24h_midnightAndNoonBoundaries() {
+        let formatter = AvailabilityFormatter(locale: forced24)
+        #expect(formatter.formatTimeRange(slot(25, 0, 0, 9, 0)) == "0-9")
+        #expect(formatter.formatTimeRange(slot(25, 12, 0, 17, 0)) == "12-17")
+    }
+
+    @Test func twelveHour_midnightAndNoonBoundaries_unchanged() {
+        let formatter = AvailabilityFormatter(locale: enUS)
+        #expect(formatter.formatTimeRange(slot(25, 0, 0, 9, 0)) == "12-9am")
+        #expect(formatter.formatTimeRange(slot(25, 11, 30, 12, 0)) == "11:30am-12pm")
+    }
+
+    @Test func forced24h_fullOutput_noPeriods() {
+        let formatter = AvailabilityFormatter(locale: forced24)
+        let slots = [date(2026, 3, 25): [slot(25, 9, 30, 10, 15), slot(25, 14, 0, 15, 0)]]
+        #expect(formatter.format(slots: slots) == "Wed Mar 25: 9:30-10:15, 14-15")
+    }
+
+    @Test func dayFirstLocale_labelOrderLocalizes() {
+        // en_AU orders day before month ("Wed 25 Mar") with English names,
+        // so the assertion is deterministic across machines.
+        let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_AU"))
+        let slots = [date(2026, 3, 25): [slot(25, 14, 0, 15, 0)]]
+        #expect(formatter.format(slots: slots) == "Wed 25 Mar: 2-3pm")
+    }
+
+    @Test func timezonePlusLocale_combinedPathConsistent() throws {
+        // 14:00-15:00 UTC is 10-11 in New York; a 24h locale must render the
+        // converted times with the New York day label.
+        let utcCal: Calendar = {
+            var c = Calendar.current
+            c.timeZone = TimeZone(identifier: "UTC")!
+            return c
+        }()
+        let start = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 14))!
+        let end = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 15))!
+        let dayKey = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25))!
+        let newYork = try #require(TimeZone(identifier: "America/New_York"))
+
+        let formatter = AvailabilityFormatter(locale: forced24)
+        let output = formatter.format(
+            slots: [dayKey: [TimeSlot(start: start, end: end)]],
+            timezone: newYork
+        )
+        #expect(output == "Wed Mar 25: 10-11")
+    }
+}
+
+// ============================================================================
 // MARK: - PasteboardWriter Tests (KTD4)
 // ============================================================================
 
 @Suite("PasteboardWriter")
 @MainActor
 struct PasteboardWriterTests {
+    /// Pinned so golden strings stay en_US byte-exact (OQ2).
+    private let enUS = Locale(identifier: "en_US")
+
     /// Uniquely named pasteboard so tests never touch the user's clipboard.
     private func testPasteboard() -> NSPasteboard {
         NSPasteboard(name: NSPasteboard.Name("test.availabilityclick.\(UUID().uuidString)"))
@@ -1084,11 +1174,12 @@ struct PasteboardWriterTests {
     @Test func plainText_writesAllThreeFlavors_stringByteIdentical() {
         let pb = testPasteboard()
         let wrote = PasteboardWriter.write(
-            slots: sampleSlots, showTimeZone: false, template: .plainText, pasteboard: pb
+            slots: sampleSlots, showTimeZone: false, template: .plainText,
+            locale: enUS, pasteboard: pb
         )
         #expect(wrote)
 
-        let expected = AvailabilityFormatter().format(
+        let expected = AvailabilityFormatter(locale: enUS).format(
             slots: sampleSlots, showTimeZone: false, template: .plainText
         )
         #expect(pb.string(forType: .string) == expected)
@@ -1100,7 +1191,8 @@ struct PasteboardWriterTests {
     @Test func markdown_writesExactlyOneFlavor() {
         let pb = testPasteboard()
         PasteboardWriter.write(
-            slots: sampleSlots, showTimeZone: false, template: .markdown, pasteboard: pb
+            slots: sampleSlots, showTimeZone: false, template: .markdown,
+            locale: enUS, pasteboard: pb
         )
         #expect(pb.string(forType: .string) == "- **Wed Mar 25:** 9-10:30am, 2-3pm")
         #expect(pb.data(forType: .rtf) == nil)
@@ -1110,7 +1202,8 @@ struct PasteboardWriterTests {
     @Test func rtf_roundTripsWithBoldDayLabelsAndPlainTimes() throws {
         let pb = testPasteboard()
         PasteboardWriter.write(
-            slots: sampleSlots, showTimeZone: false, template: .plainText, pasteboard: pb
+            slots: sampleSlots, showTimeZone: false, template: .plainText,
+            locale: enUS, pasteboard: pb
         )
 
         let rtfData = try #require(pb.data(forType: .rtf))
@@ -1146,7 +1239,7 @@ struct PasteboardWriterTests {
         let pb = testPasteboard()
         PasteboardWriter.write(
             slots: slots, showTimeZone: false, timezone: newYork,
-            template: .plainText, pasteboard: pb
+            template: .plainText, locale: enUS, pasteboard: pb
         )
 
         #expect(pb.string(forType: .string)?.contains("10-11am") == true)
@@ -1499,7 +1592,7 @@ struct GlobalShortcutManagerTests {
 
 @Suite("Markdown Format & Timezone")
 struct MarkdownFormatTests {
-    let formatter = AvailabilityFormatter()
+    let formatter = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
 
     // MARK: - Markdown Single Day
 

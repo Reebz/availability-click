@@ -10,12 +10,25 @@ struct AvailabilityFormatter {
     // Computed so a system timezone change mid-run is picked up immediately
     // (Calendar.current is a frozen snapshot, unlike autoupdatingCurrent).
     private var calendar: Calendar { Calendar.current }
-    private let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEE MMM d"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
+
+    /// Drives the hour cycle and day-label order (KTD5). Defaults to
+    /// autoupdatingCurrent so a live locale change takes effect without
+    /// relaunch -- mirroring the computed calendar above. Tests pin fixed
+    /// locales for deterministic golden strings.
+    var locale: Locale = .autoupdatingCurrent
+
+    /// 24h locales get 24-hour output with no am/pm periods. Detected via
+    /// the typed hourCycle API, not the dateFormat(fromTemplate: "j") sniff.
+    private var uses24HourClock: Bool {
+        switch locale.hourCycle {
+        case .zeroToTwentyThree, .oneToTwentyFour:
+            return true
+        case .zeroToEleven, .oneToTwelve:
+            return false
+        @unknown default:
+            return false
+        }
+    }
 
     /// Formats availability slots into human-readable text for pasting.
     /// Pure function — no side effects.
@@ -108,17 +121,39 @@ struct AvailabilityFormatter {
                 groupedSlots[day, default: []].append(slot)
             }
         }
-        dateFormatter.timeZone = effectiveCalendar.timeZone
+        let labelFormatter = dayLabelFormatter(timeZone: effectiveCalendar.timeZone)
 
         return groupedSlots.keys.sorted().compactMap { day in
             guard let daySlots = groupedSlots[day], !daySlots.isEmpty else { return nil }
             let sortedSlots = daySlots.sorted { $0.start < $1.start }
-            let label = dateFormatter.string(from: day)
+            let label = labelFormatter.string(from: day)
             let times = sortedSlots
                 .map { formatTimeRange($0, using: effectiveCalendar) }
                 .joined(separator: ", ")
             return (label, times)
         }
+    }
+
+    /// Day labels are hand-assembled from locale-ordered components (OQ8):
+    /// Date.FormatStyle inserts a comma in en_US ("Wed, Mar 25"), which would
+    /// break every shipped golden string. The locale's own "MMMd" template
+    /// decides day-first vs month-first; names come from the locale.
+    private func dayLabelFormatter(timeZone: TimeZone) -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = locale
+        let template = DateFormatter.dateFormat(
+            fromTemplate: "MMMd", options: 0, locale: locale
+        ) ?? "MMM d"
+        let dayFirst: Bool
+        if let dayIndex = template.firstIndex(of: "d"),
+           let monthIndex = template.firstIndex(of: "M") {
+            dayFirst = dayIndex < monthIndex
+        } else {
+            dayFirst = false
+        }
+        f.dateFormat = dayFirst ? "EEE d MMM" : "EEE MMM d"
+        f.timeZone = timeZone
+        return f
     }
 
     // MARK: - Time Range Formatting
@@ -132,6 +167,15 @@ struct AvailabilityFormatter {
         let startMinute = cal.component(.minute, from: slot.start)
         let endHour = cal.component(.hour, from: slot.end)
         let endMinute = cal.component(.minute, from: slot.end)
+
+        // 24h is a real branch (KTD5): no am/pm periods, no same-period
+        // suffix elision. "14-15" on the hour, "14:30-16:00" otherwise.
+        if uses24HourClock {
+            let bothOnTheHour = startMinute == 0 && endMinute == 0
+            let startStr = format24Hour(hour: startHour, minute: startMinute, forceMinutes: !bothOnTheHour)
+            let endStr = format24Hour(hour: endHour, minute: endMinute, forceMinutes: !bothOnTheHour)
+            return "\(startStr)-\(endStr)"
+        }
 
         let startPeriod = period(for: startHour)
         let endPeriod = period(for: endHour)
@@ -154,6 +198,13 @@ struct AvailabilityFormatter {
         } else {
             return "\(displayHour):\(String(format: "%02d", minute))\(suffix)"
         }
+    }
+
+    private func format24Hour(hour: Int, minute: Int, forceMinutes: Bool) -> String {
+        if forceMinutes {
+            return "\(hour):\(String(format: "%02d", minute))"
+        }
+        return "\(hour)"
     }
 
     /// Converts 24-hour to 12-hour display. 0 → 12, 13 → 1, etc.
