@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum FormatTemplate {
@@ -26,15 +27,75 @@ struct AvailabilityFormatter {
     ) -> String {
         guard !slots.isEmpty else { return "" }
 
-        let effectiveCalendar: Calendar
-        if let tz = timezone {
-            var cal = Calendar.current
-            cal.timeZone = tz
-            effectiveCalendar = cal
-        } else {
-            effectiveCalendar = calendar
+        let effectiveCalendar = calendar(for: timezone)
+        var lines: [String] = []
+
+        for line in dayLines(slots: slots, using: effectiveCalendar) {
+            switch template {
+            case .plainText:
+                lines.append("\(line.label): \(line.times)")
+            case .markdown:
+                lines.append("- **\(line.label):** \(line.times)")
+            }
         }
 
+        if showTimeZone {
+            lines.append("(\(Self.timezoneString(for: timezone)))")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Rich-flavor rendering of the plain-text template: bold day labels,
+    /// plain times (KTD4). The markdown template never goes through here --
+    /// its syntax IS the artifact and stays pure plain text.
+    func formatAttributed(
+        slots: [Date: [TimeSlot]],
+        showTimeZone: Bool = false,
+        timezone: TimeZone? = nil
+    ) -> NSAttributedString {
+        guard !slots.isEmpty else { return NSAttributedString() }
+
+        let effectiveCalendar = calendar(for: timezone)
+        let fontSize = NSFont.systemFontSize
+        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: fontSize)]
+        let plain: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: fontSize)]
+
+        let result = NSMutableAttributedString()
+        for line in dayLines(slots: slots, using: effectiveCalendar) {
+            if result.length > 0 {
+                result.append(NSAttributedString(string: "\n", attributes: plain))
+            }
+            result.append(NSAttributedString(string: "\(line.label):", attributes: bold))
+            result.append(NSAttributedString(string: " \(line.times)", attributes: plain))
+        }
+
+        if showTimeZone {
+            result.append(NSAttributedString(
+                string: "\n(\(Self.timezoneString(for: timezone)))",
+                attributes: plain
+            ))
+        }
+
+        return result
+    }
+
+    // MARK: - Shared Line Building
+
+    private func calendar(for timezone: TimeZone?) -> Calendar {
+        guard let tz = timezone else { return calendar }
+        var cal = Calendar.current
+        cal.timeZone = tz
+        return cal
+    }
+
+    /// One rendered day per element: label ("Wed Mar 25") and its time list
+    /// ("9-10:30am, 2-3pm"). Shared by the plain and attributed renderers so
+    /// their content can never drift apart.
+    private func dayLines(
+        slots: [Date: [TimeSlot]],
+        using effectiveCalendar: Calendar
+    ) -> [(label: String, times: String)] {
         // Day labels and grouping must follow the recipient timezone too, or a
         // converted time gets paired with the sender-local day name (Sydney
         // Tue 9am shown as "Tue ... 7pm" when it is Monday evening in New
@@ -49,29 +110,15 @@ struct AvailabilityFormatter {
         }
         dateFormatter.timeZone = effectiveCalendar.timeZone
 
-        let sortedDays = groupedSlots.keys.sorted()
-        var lines: [String] = []
-
-        for day in sortedDays {
-            guard let daySlots = groupedSlots[day], !daySlots.isEmpty else { continue }
+        return groupedSlots.keys.sorted().compactMap { day in
+            guard let daySlots = groupedSlots[day], !daySlots.isEmpty else { return nil }
             let sortedSlots = daySlots.sorted { $0.start < $1.start }
-            let dayLabel = dateFormatter.string(from: day)
-            let timeParts = sortedSlots.map { formatTimeRange($0, using: effectiveCalendar) }
-            let timeList = timeParts.joined(separator: ", ")
-
-            switch template {
-            case .plainText:
-                lines.append("\(dayLabel): \(timeList)")
-            case .markdown:
-                lines.append("- **\(dayLabel):** \(timeList)")
-            }
+            let label = dateFormatter.string(from: day)
+            let times = sortedSlots
+                .map { formatTimeRange($0, using: effectiveCalendar) }
+                .joined(separator: ", ")
+            return (label, times)
         }
-
-        if showTimeZone {
-            lines.append("(\(Self.timezoneString(for: timezone)))")
-        }
-
-        return lines.joined(separator: "\n")
     }
 
     // MARK: - Time Range Formatting

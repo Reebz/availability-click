@@ -21,6 +21,7 @@
 		98117A9B39BE9A67267D9ED7 /* TimeSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D9FF7FE6F4B6C3BB42C24F /* TimeSlot.swift */; };
 		9E3B46203B285DE6C134EC81 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D452BE895B656488DFB58C4 /* AppSettings.swift */; };
 		A3BDFC8977EFF647E701D0AD /* AvailabilityClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 569E959708F1407090998FA6 /* AvailabilityClickTests.swift */; };
+		B16C142E36CAAB9B67237AE8 /* PasteboardWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86D0BA75A5C3590A01E37BA3 /* PasteboardWriter.swift */; };
 		CC5C37DF0CCAAF4B1F87EC29 /* AvailabilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AE9A0A29A6E2EA167DB8D0 /* AvailabilityService.swift */; };
 /* End PBXBuildFile section */
 
@@ -48,6 +49,7 @@
 		6D452BE895B656488DFB58C4 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		732056A73A89431D70236ADA /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		73D9FF7FE6F4B6C3BB42C24F /* TimeSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeSlot.swift; sourceTree = "<group>"; };
+		86D0BA75A5C3590A01E37BA3 /* PasteboardWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardWriter.swift; sourceTree = "<group>"; };
 		A050AD9B688ABDB99884D584 /* PreviewPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPopoverView.swift; sourceTree = "<group>"; };
 		B6B8312F6AD4714F2023A858 /* CalendarPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPickerView.swift; sourceTree = "<group>"; };
 		CE5B4D99DB879D1AABBDC26E /* GlobalShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutManager.swift; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				CE5B4D99DB879D1AABBDC26E /* GlobalShortcutManager.swift */,
+				86D0BA75A5C3590A01E37BA3 /* PasteboardWriter.swift */,
 				732056A73A89431D70236ADA /* StatusItemController.swift */,
 			);
 			path = Utilities;
@@ -138,7 +141,7 @@
 			path = AvailabilityClick;
 			sourceTree = "<group>";
 		};
-		"TEMP_251BE455-F96D-4E6E-B8CC-6E07A3A1114E" /* .claude */ = {
+		"TEMP_58738940-05BC-422A-B705-D0F0F44DCEF4" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -239,6 +242,7 @@
 				28BF0364C582B8FA1F574BFC /* CalendarPickerView.swift in Sources */,
 				28682CCDFA643BF22D6928D5 /* CalendarService.swift in Sources */,
 				61DAA575EE41774A9F7712EB /* GlobalShortcutManager.swift in Sources */,
+				B16C142E36CAAB9B67237AE8 /* PasteboardWriter.swift in Sources */,
 				12BD38AC3BBC9939C643D03A /* PreviewPopoverView.swift in Sources */,
 				2661E40CB3655C0F30C6A471 /* SettingsView.swift in Sources */,
 				4EDCA655F151D1137B40367B /* ShortcutRecorderView.swift in Sources */,

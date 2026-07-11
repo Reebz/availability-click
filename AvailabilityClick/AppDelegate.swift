@@ -35,7 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController!
     private let calendarService = CalendarService.shared
     private let availabilityService = AvailabilityService()
-    private let formatter = AvailabilityFormatter()
     private var shortcutManager: GlobalShortcutManager!
     private var shortcutObserver: NSObjectProtocol?
     private var recordingObservers: [NSObjectProtocol] = []
@@ -257,16 +256,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if slots.isEmpty {
                 statusItemController.showOutcome(.noSlots)
             } else {
-                let template = AppSettings.defaultFormatTemplate
-                let text = formatter.format(
+                PasteboardWriter.write(
                     slots: slots,
                     showTimeZone: AppSettings.showTimeZone,
-                    template: template
+                    template: AppSettings.defaultFormatTemplate
                 )
-
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-
                 statusItemController.showOutcome(.copied)
             }
         }

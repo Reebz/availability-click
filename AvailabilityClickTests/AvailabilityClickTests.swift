@@ -1066,6 +1066,114 @@ struct DateFromMinutesTests {
 }
 
 // ============================================================================
+// MARK: - PasteboardWriter Tests (KTD4)
+// ============================================================================
+
+@Suite("PasteboardWriter")
+@MainActor
+struct PasteboardWriterTests {
+    /// Uniquely named pasteboard so tests never touch the user's clipboard.
+    private func testPasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("test.availabilityclick.\(UUID().uuidString)"))
+    }
+
+    private var sampleSlots: [Date: [TimeSlot]] {
+        [date(2026, 3, 25): [slot(25, 9, 0, 10, 30), slot(25, 14, 0, 15, 0)]]
+    }
+
+    @Test func plainText_writesAllThreeFlavors_stringByteIdentical() {
+        let pb = testPasteboard()
+        let wrote = PasteboardWriter.write(
+            slots: sampleSlots, showTimeZone: false, template: .plainText, pasteboard: pb
+        )
+        #expect(wrote)
+
+        let expected = AvailabilityFormatter().format(
+            slots: sampleSlots, showTimeZone: false, template: .plainText
+        )
+        #expect(pb.string(forType: .string) == expected)
+        #expect(pb.string(forType: .string) == "Wed Mar 25: 9-10:30am, 2-3pm")
+        #expect(pb.data(forType: .rtf) != nil)
+        #expect(pb.data(forType: .html) != nil)
+    }
+
+    @Test func markdown_writesExactlyOneFlavor() {
+        let pb = testPasteboard()
+        PasteboardWriter.write(
+            slots: sampleSlots, showTimeZone: false, template: .markdown, pasteboard: pb
+        )
+        #expect(pb.string(forType: .string) == "- **Wed Mar 25:** 9-10:30am, 2-3pm")
+        #expect(pb.data(forType: .rtf) == nil)
+        #expect(pb.data(forType: .html) == nil)
+    }
+
+    @Test func rtf_roundTripsWithBoldDayLabelsAndPlainTimes() throws {
+        let pb = testPasteboard()
+        PasteboardWriter.write(
+            slots: sampleSlots, showTimeZone: false, template: .plainText, pasteboard: pb
+        )
+
+        let rtfData = try #require(pb.data(forType: .rtf))
+        let attributed = try #require(NSAttributedString(rtf: rtfData, documentAttributes: nil))
+        #expect(attributed.string.hasPrefix("Wed Mar 25:"))
+
+        let labelFont = try #require(
+            attributed.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        )
+        #expect(labelFont.fontDescriptor.symbolicTraits.contains(.bold))
+
+        let timesLocation = ("Wed Mar 25: " as NSString).length
+        let timesFont = try #require(
+            attributed.attribute(.font, at: timesLocation, effectiveRange: nil) as? NSFont
+        )
+        #expect(!timesFont.fontDescriptor.symbolicTraits.contains(.bold))
+    }
+
+    @Test func timezoneConvertedCopy_embedsConvertedTimesInAllFlavors() throws {
+        // 14:00-15:00 UTC is 10-11am in New York; every flavor must carry
+        // the converted time, not the sender-local one.
+        let utcCal: Calendar = {
+            var c = Calendar.current
+            c.timeZone = TimeZone(identifier: "UTC")!
+            return c
+        }()
+        let start = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 14))!
+        let end = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25, hour: 15))!
+        let dayKey = utcCal.date(from: DateComponents(year: 2026, month: 3, day: 25))!
+        let slots = [dayKey: [TimeSlot(start: start, end: end)]]
+        let newYork = try #require(TimeZone(identifier: "America/New_York"))
+
+        let pb = testPasteboard()
+        PasteboardWriter.write(
+            slots: slots, showTimeZone: false, timezone: newYork,
+            template: .plainText, pasteboard: pb
+        )
+
+        #expect(pb.string(forType: .string)?.contains("10-11am") == true)
+
+        let rtfData = try #require(pb.data(forType: .rtf))
+        let fromRTF = try #require(NSAttributedString(rtf: rtfData, documentAttributes: nil))
+        #expect(fromRTF.string.contains("10-11am"))
+
+        let htmlData = try #require(pb.data(forType: .html))
+        let html = try #require(String(data: htmlData, encoding: .utf8))
+        #expect(html.contains("10-11am"))
+    }
+
+    @Test func emptySlots_writesNothing_pasteboardUntouched() {
+        let pb = testPasteboard()
+        pb.clearContents()
+        pb.setString("sentinel", forType: .string)
+
+        let wrote = PasteboardWriter.write(
+            slots: [:], showTimeZone: false, template: .plainText, pasteboard: pb
+        )
+        #expect(!wrote)
+        #expect(pb.string(forType: .string) == "sentinel")
+    }
+}
+
+// ============================================================================
 // MARK: - Calendar Selection Tests (KTD2)
 // ============================================================================
 

@@ -196,9 +196,10 @@ final class StatusItemController: NSObject {
 
         let popoverView = PreviewPopoverView(
             slots: slots,
-            onCopy: { [weak self] text in
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
+            // The popover writes the pasteboard itself (PasteboardWriter with
+            // its selected timezone/template) so rich flavors match what the
+            // user previewed; this callback is just close-and-flash.
+            onCopy: { [weak self] in
                 self?.previewPopover?.close()
                 self?.previewPopover = nil
                 self?.showOutcome(.copied)

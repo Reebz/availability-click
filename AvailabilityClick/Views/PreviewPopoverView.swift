@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PreviewPopoverView: View {
     let slots: [Date: [TimeSlot]]
-    let onCopy: (String) -> Void
+    let onCopy: () -> Void
     let onDismiss: () -> Void
 
     @State private var selectedFormat: FormatTemplate = AppSettings.defaultFormatTemplate
@@ -65,7 +65,15 @@ struct PreviewPopoverView: View {
                 Spacer()
 
                 Button("Copy") {
-                    onCopy(formattedText)
+                    // Write through the shared writer with the selection the
+                    // user is looking at, so rich flavors match the preview.
+                    PasteboardWriter.write(
+                        slots: slots,
+                        showTimeZone: true,
+                        timezone: selectedTimezone,
+                        template: selectedFormat
+                    )
+                    onCopy()
                 }
                 .keyboardShortcut(.defaultAction)
             }
