@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let formatter = AvailabilityFormatter()
     private var shortcutManager: GlobalShortcutManager!
     private var shortcutObserver: NSObjectProtocol?
+    private var recordingObservers: [NSObjectProtocol] = []
 
     /// Debounce: ignore clicks within 500ms of previous
     private var lastCopyTime: Date = .distantPast
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutManager = GlobalShortcutManager()
         registerSavedShortcut()
         observeShortcutChanges()
+        observeRecordingState()
 
         // Request calendar access on first launch
         Task {
@@ -45,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let observer = shortcutObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        for observer in recordingObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        recordingObservers = []
     }
 
     // MARK: - Keyboard Shortcut
@@ -107,6 +113,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let saved = AppSettings.globalShortcut
         guard saved != lastAppliedShortcut else { return }
         applyShortcut(saved)
+    }
+
+    /// Explicit recorder-to-manager channel (not the defaults observer): the
+    /// dedupe guard above would swallow re-recording the identical combo,
+    /// leaving a suspended hotkey dead. resume() is a no-op when a register
+    /// call already landed the new combo.
+    private func observeRecordingState() {
+        let center = NotificationCenter.default
+        recordingObservers.append(center.addObserver(
+            forName: .shortcutRecordingBegan, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shortcutManager.suspend() }
+        })
+        recordingObservers.append(center.addObserver(
+            forName: .shortcutRecordingEnded, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shortcutManager.resume() }
+        })
     }
 
     // MARK: - Preview

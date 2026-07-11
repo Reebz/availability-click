@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 @testable import AvailabilityClick
 
 // MARK: - Test Helpers
@@ -903,6 +904,168 @@ struct DateFromMinutesTests {
         let result = service.dateFromMinutes(1439, on: day)
         #expect(cal.component(.hour, from: result) == 23)
         #expect(cal.component(.minute, from: result) == 59)
+    }
+}
+
+// ============================================================================
+// MARK: - GlobalShortcutManager Tests
+// ============================================================================
+
+@Suite("GlobalShortcutManager")
+@MainActor
+struct GlobalShortcutManagerTests {
+    /// Manager with stubbed Carbon seams counting register/unregister calls.
+    private func stubbedManager(
+        status: OSStatus = 0
+    ) -> (manager: GlobalShortcutManager, registers: () -> Int, unregisters: () -> Int) {
+        let manager = GlobalShortcutManager()
+        var registers = 0
+        var unregisters = 0
+        manager.registerHotKeyFn = { _, _ in
+            registers += 1
+            return status == 0 ? (0, OpaquePointer(bitPattern: 0x1)) : (status, nil)
+        }
+        manager.unregisterHotKeyFn = { _ in unregisters += 1 }
+        return (manager, { registers }, { unregisters })
+    }
+
+    // MARK: - Modifier Mapping (NSEvent -> Carbon constants)
+
+    @Test func carbonModifiers_mapsEachFlag() {
+        #expect(GlobalShortcutManager.carbonModifiers(from: .command) == 256)
+        #expect(GlobalShortcutManager.carbonModifiers(from: .shift) == 512)
+        #expect(GlobalShortcutManager.carbonModifiers(from: .option) == 2048)
+        #expect(GlobalShortcutManager.carbonModifiers(from: .control) == 4096)
+    }
+
+    @Test func carbonModifiers_composesCombinations() {
+        #expect(GlobalShortcutManager.carbonModifiers(from: [.control, .shift]) == 4096 + 512)
+        #expect(GlobalShortcutManager.carbonModifiers(from: [.command, .option]) == 256 + 2048)
+        #expect(
+            GlobalShortcutManager.carbonModifiers(from: [.command, .shift, .option, .control])
+                == 256 + 512 + 2048 + 4096
+        )
+        #expect(GlobalShortcutManager.carbonModifiers(from: []) == 0)
+    }
+
+    @Test func carbonModifiers_ignoresNonHotkeyFlags() {
+        let flags: NSEvent.ModifierFlags = [.control, .capsLock, .function]
+        #expect(GlobalShortcutManager.carbonModifiers(from: flags) == 4096)
+    }
+
+    // MARK: - Registration Success / Action
+
+    @Test func register_success_isActiveAndFiresAction() {
+        let (manager, registers, _) = stubbedManager()
+        var fired = false
+        manager.register(keyCode: 8, modifiers: [.control, .shift]) { fired = true }
+
+        #expect(manager.isActive)
+        #expect(!GlobalShortcutManager.lastRegistrationFailed)
+        #expect(registers() == 1)
+
+        manager.handleHotKeyPressed()
+        #expect(fired)
+    }
+
+    @Test func unregister_clearsStateAndAction() {
+        let (manager, registers, unregisters) = stubbedManager()
+        var fired = false
+        manager.register(keyCode: 8, modifiers: [.control, .shift]) { fired = true }
+        manager.unregister()
+
+        #expect(!manager.isActive)
+        #expect(registers() == 1)
+        #expect(unregisters() == 1)
+
+        manager.handleHotKeyPressed()
+        #expect(!fired)
+    }
+
+    // MARK: - Registration Failure
+
+    @Test func registrationFailure_leavesConsistentUnregisteredState() {
+        let (manager, registers, unregisters) = stubbedManager(status: -50)
+        var fired = false
+        manager.register(keyCode: 8, modifiers: [.control, .shift]) { fired = true }
+
+        #expect(!manager.isActive)
+        #expect(GlobalShortcutManager.lastRegistrationFailed)
+        #expect(registers() == 1)
+        #expect(unregisters() == 0)
+
+        // Action must not survive a refused registration.
+        manager.handleHotKeyPressed()
+        #expect(!fired)
+
+        // resume() after a failed register must not resurrect anything.
+        manager.resume()
+        #expect(registers() == 1)
+
+        // unregister() stays safe and clears the failure flag.
+        manager.unregister()
+        #expect(!manager.isActive)
+        #expect(!GlobalShortcutManager.lastRegistrationFailed)
+    }
+
+    // MARK: - Recorder Suspend / Resume (OQ5)
+
+    @Test func suspendResume_sameComboRerecord_holdsExactlyOneRegistration() {
+        let (manager, registers, unregisters) = stubbedManager()
+        manager.register(keyCode: 8, modifiers: [.control, .shift]) {}
+
+        // Record-start suspends; re-recording the identical combo is deduped
+        // by the defaults observer, so only the ended signal (resume) arrives.
+        manager.suspend()
+        #expect(!manager.isActive)
+        manager.resume()
+
+        #expect(manager.isActive)
+        #expect(registers() == 2)
+        #expect(unregisters() == 1)
+        #expect(registers() - unregisters() == 1)
+    }
+
+    @Test func resume_afterNewComboRegistered_doesNotDoubleRegister() {
+        let (manager, registers, unregisters) = stubbedManager()
+        manager.register(keyCode: 8, modifiers: [.control, .shift]) {}
+
+        manager.suspend()
+        // Capture wrote a different combo: the defaults observer registers it
+        // before the recordingEnded resume() lands.
+        manager.register(keyCode: 9, modifiers: [.command]) {}
+        manager.resume()
+
+        #expect(manager.isActive)
+        #expect(registers() == 2)
+        #expect(unregisters() == 1)
+    }
+
+    @Test func suspend_withoutRegistration_isNoOp() {
+        let (manager, registers, unregisters) = stubbedManager()
+        manager.suspend()
+        manager.resume()
+        #expect(!manager.isActive)
+        #expect(registers() == 0)
+        #expect(unregisters() == 0)
+    }
+
+    // MARK: - Display String (unchanged behavior)
+
+    @Test func displayString_unchangedForExistingKeyCodes() {
+        #expect(
+            GlobalShortcutManager.displayString(keyCode: 8, modifiers: [.control, .shift])
+                == "\u{2303}\u{21E7}C"
+        )
+        #expect(
+            GlobalShortcutManager.displayString(keyCode: 126, modifiers: [.command])
+                == "\u{2318}\u{2191}"
+        )
+        #expect(
+            GlobalShortcutManager.displayString(keyCode: 122, modifiers: [.option])
+                == "\u{2325}F1"
+        )
+        #expect(GlobalShortcutManager.displayString(keyCode: 999, modifiers: []) == "Key999")
     }
 }
 

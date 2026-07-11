@@ -1,61 +1,200 @@
 import AppKit
+import Carbon.HIToolbox
+import os
 
+extension Notification.Name {
+    /// Posted by ShortcutRecorderView when key capture starts/stops so the
+    /// active hotkey can be suspended -- Carbon would otherwise consume the
+    /// keystroke before AppKit delivers it to the recorder field.
+    static let shortcutRecordingBegan = Notification.Name("AvailabilityClick.shortcutRecordingBegan")
+    static let shortcutRecordingEnded = Notification.Name("AvailabilityClick.shortcutRecordingEnded")
+    /// Posted after every registration attempt so the recorder can reflect
+    /// an inactive shortcut (registration refused by macOS).
+    static let shortcutRegistrationStateChanged = Notification.Name("AvailabilityClick.shortcutRegistrationStateChanged")
+}
+
+/// FourCharCode "AVCK" -- identifies this app's hotkey in the Carbon callback.
+private let hotKeySignature: FourCharCode = 0x4156_434B
+private let hotKeyID = EventHotKeyID(signature: hotKeySignature, id: 1)
+
+/// Top-level C-convention callback (Swift 6 bridge): Unmanaged round-trip of
+/// the @MainActor manager, MainActor.assumeIsolated after a main-thread
+/// check -- the dispatcher target delivers hotkey events on the main run loop.
+private let hotKeyEventHandler: EventHandlerUPP = { _, event, userData in
+    guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+
+    var pressedID = EventHotKeyID()
+    let status = GetEventParameter(
+        event,
+        EventParamName(kEventParamDirectObject),
+        EventParamType(typeEventHotKeyID),
+        nil,
+        MemoryLayout<EventHotKeyID>.size,
+        nil,
+        &pressedID
+    )
+    guard status == noErr,
+          pressedID.signature == hotKeySignature,
+          Thread.isMainThread else {
+        return OSStatus(eventNotHandledErr)
+    }
+
+    let manager = Unmanaged<GlobalShortcutManager>.fromOpaque(userData).takeUnretainedValue()
+    MainActor.assumeIsolated {
+        manager.handleHotKeyPressed()
+    }
+    return noErr
+}
+
+/// Global hotkey via Carbon `RegisterEventHotKey` -- sandbox-safe, needs no
+/// Accessibility or Input Monitoring grant (unlike the NSEvent global monitor
+/// this replaced, which silently never fired without Accessibility trust).
 @MainActor
 final class GlobalShortcutManager {
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
-    private var registeredKeyCode: UInt16?
-    private var registeredModifiers: NSEvent.ModifierFlags?
+    private static let logger = Logger(
+        subsystem: "com.availabilityclick.AvailabilityClick",
+        category: "GlobalShortcutManager"
+    )
+
+    /// True when the most recent registration attempt was refused by macOS
+    /// (e.g. the macOS 15.0-15.1 Option-only-modifier regression). Static so
+    /// the Settings recorder, which has no reference to the app's manager
+    /// instance, can render the inactive state.
+    private(set) static var lastRegistrationFailed = false
+
+    private var hotKeyRef: EventHotKeyRef?
+    private var eventHandlerRef: EventHandlerRef?
     private var action: (() -> Void)?
 
+    /// Retained registration parameters so suspend/resume (recorder capture)
+    /// can restore the hotkey even when the re-recorded combo is identical
+    /// and the UserDefaults-observer dedupe never re-applies it.
+    private var currentKeyCode: UInt16?
+    private var currentModifiers: NSEvent.ModifierFlags?
+    private var isSuspended = false
+
+    /// Injectable Carbon seams so unit tests can drive the failure path and
+    /// count registrations without touching the real hotkey table.
+    var registerHotKeyFn: (UInt32, UInt32) -> (OSStatus, EventHotKeyRef?) = { keyCode, carbonModifiers in
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            keyCode,
+            carbonModifiers,
+            hotKeyID,
+            GetEventDispatcherTarget(),
+            0,
+            &ref
+        )
+        return (status, ref)
+    }
+    var unregisterHotKeyFn: (EventHotKeyRef) -> Void = {
+        UnregisterEventHotKey($0)
+    }
+
+    var isActive: Bool { hotKeyRef != nil }
+
     func register(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, action: @escaping () -> Void) {
-        unregister()
+        unregisterCarbonHotKey()
 
-        self.registeredKeyCode = keyCode
-        self.registeredModifiers = modifiers
+        self.currentKeyCode = keyCode
+        self.currentModifiers = modifiers
         self.action = action
+        self.isSuspended = false
 
-        // Mask to only compare device-independent modifier flags
-        let mask: NSEvent.ModifierFlags = [.control, .option, .shift, .command]
-        let targetModifiers = modifiers.intersection(mask)
-
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let eventKeyCode = event.keyCode
-            let eventModifiers = event.modifierFlags.intersection(mask)
-            MainActor.assumeIsolated {
-                guard let self,
-                      eventKeyCode == keyCode,
-                      eventModifiers == targetModifiers else { return }
-                self.action?()
-            }
-        }
-
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let eventKeyCode = event.keyCode
-            let eventModifiers = event.modifierFlags.intersection(mask)
-            let matched = eventKeyCode == keyCode && eventModifiers == targetModifiers
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if matched {
-                    self.action?()
-                }
-            }
-            return matched ? nil : event
-        }
+        registerRetainedShortcut()
     }
 
     func unregister() {
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
-        }
-        if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
-        }
-        globalMonitor = nil
-        localMonitor = nil
-        registeredKeyCode = nil
-        registeredModifiers = nil
+        unregisterCarbonHotKey()
+        currentKeyCode = nil
+        currentModifiers = nil
         action = nil
+        isSuspended = false
+        setRegistrationFailed(false)
+    }
+
+    /// Drops the Carbon registration but keeps the retained parameters so
+    /// `resume()` can restore it. Called while the recorder captures keys.
+    func suspend() {
+        guard currentKeyCode != nil else { return }
+        unregisterCarbonHotKey()
+        isSuspended = true
+    }
+
+    /// Restores a suspended registration. No-op when a `register` call
+    /// already landed a new combo (register clears the suspended flag).
+    func resume() {
+        guard isSuspended else { return }
+        isSuspended = false
+        registerRetainedShortcut()
+    }
+
+    // Internal (not private) so tests can simulate a hotkey press.
+    func handleHotKeyPressed() {
+        action?()
+    }
+
+    // MARK: - Carbon Plumbing
+
+    private func registerRetainedShortcut() {
+        guard let keyCode = currentKeyCode, let modifiers = currentModifiers else { return }
+
+        installEventHandlerIfNeeded()
+
+        let (status, ref) = registerHotKeyFn(UInt32(keyCode), Self.carbonModifiers(from: modifiers))
+        guard status == noErr, let ref else {
+            // Refused registrations must not crash or leave half-state: stay
+            // consistently unregistered and let the recorder show "inactive".
+            Self.logger.error("RegisterEventHotKey failed with status \(status, privacy: .public)")
+            currentKeyCode = nil
+            currentModifiers = nil
+            action = nil
+            setRegistrationFailed(true)
+            return
+        }
+
+        hotKeyRef = ref
+        setRegistrationFailed(false)
+    }
+
+    private func unregisterCarbonHotKey() {
+        if let hotKeyRef {
+            unregisterHotKeyFn(hotKeyRef)
+        }
+        hotKeyRef = nil
+    }
+
+    private func installEventHandlerIfNeeded() {
+        guard eventHandlerRef == nil else { return }
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        InstallEventHandler(
+            GetEventDispatcherTarget(),
+            hotKeyEventHandler,
+            1,
+            &eventType,
+            Unmanaged.passUnretained(self).toOpaque(),
+            &eventHandlerRef
+        )
+    }
+
+    private func setRegistrationFailed(_ failed: Bool) {
+        guard Self.lastRegistrationFailed != failed else { return }
+        Self.lastRegistrationFailed = failed
+        NotificationCenter.default.post(name: .shortcutRegistrationStateChanged, object: nil)
+    }
+
+    // MARK: - Modifier Mapping
+
+    static func carbonModifiers(from modifiers: NSEvent.ModifierFlags) -> UInt32 {
+        var carbon: UInt32 = 0
+        if modifiers.contains(.command) { carbon |= UInt32(cmdKey) }
+        if modifiers.contains(.shift) { carbon |= UInt32(shiftKey) }
+        if modifiers.contains(.option) { carbon |= UInt32(optionKey) }
+        if modifiers.contains(.control) { carbon |= UInt32(controlKey) }
+        return carbon
     }
 
     // MARK: - Human-Readable Display

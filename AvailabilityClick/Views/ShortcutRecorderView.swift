@@ -4,12 +4,14 @@ import AppKit
 struct ShortcutRecorderView: View {
     @State private var displayText: String = ""
     @State private var isRecording = false
+    @State private var registrationFailed = GlobalShortcutManager.lastRegistrationFailed
 
     var body: some View {
         HStack(spacing: 8) {
             ShortcutCaptureField(
                 displayText: $displayText,
-                isRecording: $isRecording
+                isRecording: $isRecording,
+                registrationFailed: registrationFailed
             )
             .frame(width: 120, height: 24)
             .background(
@@ -35,6 +37,11 @@ struct ShortcutRecorderView: View {
         .onAppear {
             loadSavedShortcut()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .shortcutRegistrationStateChanged)
+        ) { _ in
+            registrationFailed = GlobalShortcutManager.lastRegistrationFailed
+        }
     }
 
     private func loadSavedShortcut() {
@@ -55,6 +62,7 @@ struct ShortcutRecorderView: View {
 private struct ShortcutCaptureField: NSViewRepresentable {
     @Binding var displayText: String
     @Binding var isRecording: Bool
+    var registrationFailed: Bool
 
     func makeNSView(context: Context) -> ShortcutNSView {
         let view = ShortcutNSView()
@@ -63,12 +71,20 @@ private struct ShortcutCaptureField: NSViewRepresentable {
                 "keyCode": Int(keyCode),
                 "modifiers": Int(modifiers.rawValue),
             ]
+            // Defaults write first: the AppDelegate observer registers the new
+            // combo, then recordingEnded resumes only if that was deduped
+            // (identical combo re-recorded onto a suspended hotkey).
             UserDefaults.standard.set(dict, forKey: AppSettings.globalShortcutKey)
+            NotificationCenter.default.post(name: .shortcutRecordingEnded, object: nil)
 
             displayText = GlobalShortcutManager.displayString(keyCode: keyCode, modifiers: modifiers)
             isRecording = false
         }
         view.onRecordingChanged = { recording in
+            NotificationCenter.default.post(
+                name: recording ? .shortcutRecordingBegan : .shortcutRecordingEnded,
+                object: nil
+            )
             isRecording = recording
         }
         return view
@@ -76,6 +92,10 @@ private struct ShortcutCaptureField: NSViewRepresentable {
 
     func updateNSView(_ nsView: ShortcutNSView, context: Context) {
         nsView.displayText = displayText
+        nsView.registrationFailed = registrationFailed
+        nsView.toolTip = registrationFailed
+            ? "macOS refused to register this shortcut. Try a different combination."
+            : nil
         nsView.needsDisplay = true
     }
 }
@@ -84,6 +104,7 @@ private struct ShortcutCaptureField: NSViewRepresentable {
 
 private final class ShortcutNSView: NSView {
     var displayText: String = ""
+    var registrationFailed: Bool = false
     var onShortcutCaptured: ((UInt16, NSEvent.ModifierFlags) -> Void)?
     var onRecordingChanged: ((Bool) -> Void)?
 
@@ -101,7 +122,8 @@ private final class ShortcutNSView: NSView {
 
     override func accessibilityValue() -> Any? {
         if isRecording { return "Recording" }
-        return displayText.isEmpty ? "Click to record" : displayText
+        if displayText.isEmpty { return "Click to record" }
+        return registrationFailed ? "\(displayText), inactive" : displayText
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -116,11 +138,20 @@ private final class ShortcutNSView: NSView {
             text = displayText
         }
 
+        let color: NSColor
+        if isRecording {
+            color = .controlAccentColor
+        } else if displayText.isEmpty {
+            color = .secondaryLabelColor
+        } else if registrationFailed {
+            // Registration refused by macOS: combo shown but inactive (OQ13).
+            color = .systemOrange
+        } else {
+            color = .labelColor
+        }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: isRecording
-                ? NSColor.controlAccentColor
-                : (displayText.isEmpty ? NSColor.secondaryLabelColor : NSColor.labelColor),
+            .foregroundColor: color,
         ]
         let attrString = NSAttributedString(string: text, attributes: attributes)
         let size = attrString.size()
