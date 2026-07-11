@@ -138,7 +138,7 @@
 			path = AvailabilityClick;
 			sourceTree = "<group>";
 		};
-		"TEMP_5467A9AE-A81B-4842-80C2-19ACA49ACA50" /* .claude */ = {
+		"TEMP_11D965C2-3BB0-4D0B-8362-3954FE5C0400" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
