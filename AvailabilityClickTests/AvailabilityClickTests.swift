@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AppKit
+import Carbon.HIToolbox
 import EventKit
 @testable import AvailabilityClick
 
@@ -2044,7 +2045,7 @@ struct GlobalShortcutManagerTests {
     @Test func register_success_isActiveAndFiresAction() {
         let (manager, registers, _) = stubbedManager()
         var fired = false
-        manager.register(keyCode: 8, modifiers: [.control, .shift]) { fired = true }
+        manager.register(keyCode: 8, modifiers: [.control, .shift], onPress: { fired = true })
 
         #expect(manager.isActive)
         #expect(!GlobalShortcutManager.lastRegistrationFailed)
@@ -2054,10 +2055,29 @@ struct GlobalShortcutManagerTests {
         #expect(fired)
     }
 
+    @Test func pressAndRelease_fireTheirOwnActions() {
+        let (manager, _, _) = stubbedManager()
+        var pressed = false, released = false
+        manager.register(
+            keyCode: 8, modifiers: [.control, .shift],
+            onPress: { pressed = true }, onRelease: { released = true }
+        )
+        manager.handleHotKeyPressed()
+        #expect(pressed && !released)
+        manager.handleHotKeyReleased()
+        #expect(released)
+    }
+
+    @Test func handlesBothPressAndReleaseEventKinds() {
+        #expect(GlobalShortcutManager.handledEventKinds.contains(kEventHotKeyPressed))
+        #expect(GlobalShortcutManager.handledEventKinds.contains(kEventHotKeyReleased))
+        #expect(GlobalShortcutManager.handledEventKinds.count == 2)
+    }
+
     @Test func unregister_clearsStateAndAction() {
         let (manager, registers, unregisters) = stubbedManager()
         var fired = false
-        manager.register(keyCode: 8, modifiers: [.control, .shift]) { fired = true }
+        manager.register(keyCode: 8, modifiers: [.control, .shift], onPress: { fired = true })
         manager.unregister()
 
         #expect(!manager.isActive)
@@ -2073,7 +2093,7 @@ struct GlobalShortcutManagerTests {
     @Test func registrationFailure_leavesConsistentUnregisteredState() {
         let (manager, registers, unregisters) = stubbedManager(status: -50)
         var fired = false
-        manager.register(keyCode: 8, modifiers: [.control, .shift]) { fired = true }
+        manager.register(keyCode: 8, modifiers: [.control, .shift], onPress: { fired = true })
 
         #expect(!manager.isActive)
         #expect(GlobalShortcutManager.lastRegistrationFailed)
@@ -2098,7 +2118,7 @@ struct GlobalShortcutManagerTests {
 
     @Test func suspendResume_sameComboRerecord_holdsExactlyOneRegistration() {
         let (manager, registers, unregisters) = stubbedManager()
-        manager.register(keyCode: 8, modifiers: [.control, .shift]) {}
+        manager.register(keyCode: 8, modifiers: [.control, .shift], onPress: {})
 
         // Record-start suspends; re-recording the identical combo is deduped
         // by the defaults observer, so only the ended signal (resume) arrives.
@@ -2114,12 +2134,12 @@ struct GlobalShortcutManagerTests {
 
     @Test func resume_afterNewComboRegistered_doesNotDoubleRegister() {
         let (manager, registers, unregisters) = stubbedManager()
-        manager.register(keyCode: 8, modifiers: [.control, .shift]) {}
+        manager.register(keyCode: 8, modifiers: [.control, .shift], onPress: {})
 
         manager.suspend()
         // Capture wrote a different combo: the defaults observer registers it
         // before the recordingEnded resume() lands.
-        manager.register(keyCode: 9, modifiers: [.command]) {}
+        manager.register(keyCode: 9, modifiers: [.command], onPress: {})
         manager.resume()
 
         #expect(manager.isActive)
@@ -2610,5 +2630,54 @@ struct StaleWatchGuardTests {
         for _ in 0..<3 { d.schedule { await counter.bump() } }
         try? await Task.sleep(for: .milliseconds(200))
         #expect(await counter.value == 1)
+    }
+}
+
+// ============================================================================
+// MARK: - Hold Gesture Tests (U9/R12, KTD9)
+// ============================================================================
+
+@Suite("Hold Gesture")
+@MainActor
+struct HoldGestureTests {
+    private let base = Date(timeIntervalSinceReferenceDate: 1000)
+    private func machine() -> HoldGestureMachine { HoldGestureMachine(threshold: 0.4) }
+
+    @Test func quickTap_copies() {
+        let m = machine()
+        _ = m.press(at: base)
+        #expect(m.release(at: base.addingTimeInterval(0.2)) == .copy)
+    }
+
+    @Test func heldPastThreshold_releaseOpensPreview() {
+        let m = machine()
+        _ = m.press(at: base)
+        #expect(m.release(at: base.addingTimeInterval(0.5)) == .openPreview)
+    }
+
+    @Test func timerFired_opensPreview_thenLateReleaseIgnored() {
+        let m = machine()
+        _ = m.press(at: base)
+        #expect(m.timerFired() == .openPreview)
+        #expect(m.release(at: base.addingTimeInterval(0.6)) == .none)
+    }
+
+    @Test func timerFired_isOneShot() {
+        let m = machine()
+        _ = m.press(at: base)
+        #expect(m.timerFired() == .openPreview)
+        #expect(m.timerFired() == .none)
+    }
+
+    @Test func releaseWithoutPress_isNoOp() {
+        #expect(machine().release(at: base) == .none)
+    }
+
+    @Test func newPress_resetsState_soNextTapCopies() {
+        let m = machine()
+        _ = m.press(at: base)
+        _ = m.timerFired()  // preview opened
+        _ = m.press(at: base.addingTimeInterval(1))
+        #expect(m.release(at: base.addingTimeInterval(1.1)) == .copy)
     }
 }

@@ -39,9 +39,14 @@ private let hotKeyEventHandler: EventHandlerUPP = { _, event, userData in
         return OSStatus(eventNotHandledErr)
     }
 
+    let kind = GetEventKind(event)
     let manager = Unmanaged<GlobalShortcutManager>.fromOpaque(userData).takeUnretainedValue()
     MainActor.assumeIsolated {
-        manager.handleHotKeyPressed()
+        if kind == UInt32(kEventHotKeyReleased) {
+            manager.handleHotKeyReleased()
+        } else {
+            manager.handleHotKeyPressed()
+        }
     }
     return noErr
 }
@@ -62,11 +67,17 @@ final class GlobalShortcutManager {
     /// instance, can render the inactive state.
     private(set) static var lastRegistrationFailed = false
 
+    /// The Carbon event kinds this manager listens for (U9): a hold needs the
+    /// release event too, not only the press. Source of truth for the handler
+    /// installation below; asserted by a test.
+    static let handledEventKinds: [Int] = [kEventHotKeyPressed, kEventHotKeyReleased]
+
     private var hotKeyRef: EventHotKeyRef?
     // nonisolated(unsafe) only so deinit (nonisolated) can remove it; every
     // other access stays on the MainActor.
     private nonisolated(unsafe) var eventHandlerRef: EventHandlerRef?
-    private var action: (() -> Void)?
+    private var pressAction: (() -> Void)?
+    private var releaseAction: (() -> Void)?
 
     deinit {
         // The handler's userData is an unretained self -- it must not
@@ -103,12 +114,18 @@ final class GlobalShortcutManager {
 
     var isActive: Bool { hotKeyRef != nil }
 
-    func register(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, action: @escaping () -> Void) {
+    func register(
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags,
+        onPress: @escaping () -> Void,
+        onRelease: (() -> Void)? = nil
+    ) {
         unregisterCarbonHotKey()
 
         self.currentKeyCode = keyCode
         self.currentModifiers = modifiers
-        self.action = action
+        self.pressAction = onPress
+        self.releaseAction = onRelease
         self.isSuspended = false
 
         registerRetainedShortcut()
@@ -118,7 +135,8 @@ final class GlobalShortcutManager {
         unregisterCarbonHotKey()
         currentKeyCode = nil
         currentModifiers = nil
-        action = nil
+        pressAction = nil
+        releaseAction = nil
         isSuspended = false
         setRegistrationFailed(false)
     }
@@ -139,9 +157,13 @@ final class GlobalShortcutManager {
         registerRetainedShortcut()
     }
 
-    // Internal (not private) so tests can simulate a hotkey press.
+    // Internal (not private) so tests can simulate a hotkey press/release.
     func handleHotKeyPressed() {
-        action?()
+        pressAction?()
+    }
+
+    func handleHotKeyReleased() {
+        releaseAction?()
     }
 
     // MARK: - Carbon Plumbing
@@ -158,7 +180,8 @@ final class GlobalShortcutManager {
             Self.logger.error("RegisterEventHotKey failed with status \(status, privacy: .public)")
             currentKeyCode = nil
             currentModifiers = nil
-            action = nil
+            pressAction = nil
+            releaseAction = nil
             setRegistrationFailed(true)
             return
         }
@@ -176,15 +199,15 @@ final class GlobalShortcutManager {
 
     private func installEventHandlerIfNeeded() {
         guard eventHandlerRef == nil else { return }
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
+        // Both press and release, so a held key can open the preview (U9).
+        var eventTypes = Self.handledEventKinds.map {
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32($0))
+        }
         InstallEventHandler(
             GetEventDispatcherTarget(),
             hotKeyEventHandler,
-            1,
-            &eventType,
+            eventTypes.count,
+            &eventTypes,
             Unmanaged.passUnretained(self).toOpaque(),
             &eventHandlerRef
         )

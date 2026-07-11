@@ -97,6 +97,43 @@ final class TrailingDebouncer {
     }
 }
 
+/// Tap-vs-hold reducer for the global hotkey (U9, KTD9). Pure state machine,
+/// clock-injected, so it is unit-testable without timers: press starts the
+/// hold; a release before the threshold is a tap (copy), the threshold timer
+/// firing is a hold (open the preview), and a release after the hold already
+/// fired is ignored so the open preview stays put. A hold never auto-copies.
+enum HoldOutcome: Equatable { case none, copy, openPreview }
+
+@MainActor
+final class HoldGestureMachine {
+    private let threshold: TimeInterval
+    private var pressTime: Date?
+    private var previewOpen = false
+
+    init(threshold: TimeInterval) { self.threshold = threshold }
+
+    func press(at time: Date) -> HoldOutcome {
+        pressTime = time
+        previewOpen = false
+        return .none
+    }
+
+    /// The threshold timer fired: a hold. Returns `.openPreview` once; further
+    /// calls are no-ops.
+    func timerFired() -> HoldOutcome {
+        guard pressTime != nil, !previewOpen else { return .none }
+        previewOpen = true
+        return .openPreview
+    }
+
+    func release(at time: Date) -> HoldOutcome {
+        guard let pressTime else { return .none }
+        self.pressTime = nil
+        if previewOpen { return .none }  // late release; preview already open
+        return time.timeIntervalSince(pressTime) < threshold ? .copy : .openPreview
+    }
+}
+
 /// What the app last copied, so a calendar change can be checked against it
 /// (R5 watch) and the next copy can detect a silent clobber (R6 guard). The
 /// original `now` is retained so the recompute lands on the SAME days, not a
@@ -135,6 +172,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ~400ms trailing debounce over the bursty, payload-free EKEventStoreChanged
     /// notification (KTD11).
     private let staleDebouncer = TrailingDebouncer(delay: .milliseconds(400))
+
+    /// Hold gesture (U9): a press held ~400ms opens the preview instead of
+    /// copying. Threshold sits in the researched 350-450ms band.
+    static let holdThreshold: TimeInterval = 0.4
+    /// The hold-opened preview auto-dismisses after this if untouched — the
+    /// backstop for a swallowed release degrading to an open popover (KTD9).
+    static let holdPreviewSafetyTimeout: TimeInterval = 30
+    private lazy var holdMachine = HoldGestureMachine(threshold: Self.holdThreshold)
+    private var holdTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppSettings.registerDefaults()
@@ -338,10 +384,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Never customized -- register default: Ctrl+Shift+C
             shortcutManager.register(
                 keyCode: 8,
-                modifiers: [.control, .shift]
-            ) { [weak self] in
-                self?.copyDefault()
-            }
+                modifiers: [.control, .shift],
+                onPress: { [weak self] in self?.handleHotkeyPress() },
+                onRelease: { [weak self] in self?.handleHotkeyRelease() }
+            )
             return
         }
 
@@ -352,10 +398,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         shortcutManager.register(
             keyCode: UInt16(clamping: keyCode),
-            modifiers: NSEvent.ModifierFlags(rawValue: UInt(bitPattern: modifiers))
-        ) { [weak self] in
-            self?.copyDefault()
-        }
+            modifiers: NSEvent.ModifierFlags(rawValue: UInt(bitPattern: modifiers)),
+            onPress: { [weak self] in self?.handleHotkeyPress() },
+            onRelease: { [weak self] in self?.handleHotkeyRelease() }
+        )
     }
 
     private func observeShortcutChanges() {
@@ -409,6 +455,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Preview
 
     private func showPreview() {
+        presentPreview(holdInitiated: false)
+    }
+
+    // MARK: - Hold-to-Preview (U9)
+
+    /// Hotkey pressed: start the hold timer. A tap (release before threshold)
+    /// copies; the timer firing opens the preview.
+    private func handleHotkeyPress() {
+        _ = holdMachine.press(at: Date())
+        holdTimer?.invalidate()
+        holdTimer = Timer.scheduledTimer(withTimeInterval: Self.holdThreshold, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.holdTimer = nil
+                if self.holdMachine.timerFired() == .openPreview {
+                    self.presentPreview(holdInitiated: true)
+                }
+            }
+        }
+    }
+
+    /// Hotkey released: a quick release copies; a release after the hold fired
+    /// is ignored so the open preview stays put (KTD9). A swallowed release
+    /// never arrives, so the timer's hold covers it.
+    private func handleHotkeyRelease() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        switch holdMachine.release(at: Date()) {
+        case .copy: copyDefault()
+        case .openPreview: presentPreview(holdInitiated: true)
+        case .none: break
+        }
+    }
+
+    /// Shared preview flow for Option+click (`holdInitiated: false`) and a held
+    /// hotkey (`true`). A hold-opened popover is made key and gets a safety
+    /// timeout; an unauthorized/no-calendars hold shows the same outcome a copy
+    /// would, never an empty popover.
+    private func presentPreview(holdInitiated: Bool) {
         guard calendarService.isAuthorized else {
             handleUnauthorizedInteraction()
             return
@@ -425,16 +510,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let dateRange = availabilityService.fetchWindow(for: rangeType)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
-
-            let slots = availabilityService.calculateAvailability(
-                events: events,
-                rangeType: rangeType
-            )
+            let slots = availabilityService.calculateAvailability(events: events, rangeType: rangeType)
 
             if slots.isEmpty {
                 statusItemController.showOutcome(.noSlots)
             } else {
-                statusItemController.showPreviewPopover(slots: slots)
+                statusItemController.showPreviewPopover(slots: slots, holdInitiated: holdInitiated)
             }
         }
     }

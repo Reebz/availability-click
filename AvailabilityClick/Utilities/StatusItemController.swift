@@ -235,9 +235,11 @@ final class StatusItemController: NSObject {
 
     // MARK: - Preview Popover
 
-    func showPreviewPopover(slots: [Date: [TimeSlot]]) {
+    private var previewSafetyTimer: Timer?
+
+    func showPreviewPopover(slots: [Date: [TimeSlot]], holdInitiated: Bool = false) {
         // Dismiss existing popover
-        previewPopover?.close()
+        dismissPreviewPopover()
 
         let popoverView = PreviewPopoverView(
             slots: slots,
@@ -245,13 +247,11 @@ final class StatusItemController: NSObject {
             // its selected timezone/template) so rich flavors match what the
             // user previewed; this callback is just close-and-flash.
             onCopy: { [weak self] in
-                self?.previewPopover?.close()
-                self?.previewPopover = nil
+                self?.dismissPreviewPopover()
                 self?.showOutcome(.copied)
             },
             onDismiss: { [weak self] in
-                self?.previewPopover?.close()
-                self?.previewPopover = nil
+                self?.dismissPreviewPopover()
             }
         )
 
@@ -267,6 +267,26 @@ final class StatusItemController: NSObject {
         if let button = statusItem.button {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+
+        if holdInitiated {
+            // Keyboard-initiated (U9): make the popover key so Return triggers
+            // Copy, and arm the safety timeout so a swallowed release can't
+            // leave it lingering (KTD9). Click-outside/Escape/Copy still
+            // dismiss via the transient behavior and the buttons.
+            NSApp.activate(ignoringOtherApps: true)
+            previewSafetyTimer = Timer.scheduledTimer(
+                withTimeInterval: AppDelegate.holdPreviewSafetyTimeout, repeats: false
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.dismissPreviewPopover() }
+            }
+        }
+    }
+
+    private func dismissPreviewPopover() {
+        previewSafetyTimer?.invalidate()
+        previewSafetyTimer = nil
+        previewPopover?.close()
+        previewPopover = nil
     }
 
     // MARK: - First-Run Coach (KTD8)
@@ -409,6 +429,7 @@ private struct CoachmarkView: View {
             Label("Left-click copies availability", systemImage: "cursorarrow.click")
             Label("Right-click for ranges", systemImage: "filemenu.and.selection")
             Label("Option+click previews", systemImage: "eye")
+            Label("Hotkey: tap to copy · hold to preview", systemImage: "keyboard")
         }
         .font(.callout)
         .padding(14)
