@@ -42,7 +42,7 @@ Requires macOS 14 (Sonoma) or later. The app is signed with a Developer ID and n
 3. Left-click the calendar icon in your menu bar - availability copied to clipboard
 4. Cmd+V into whatever you're writing.
 
-Right-click the menu bar icon for longer date ranges, Settings, and Quit.
+Right-click the menu bar icon for longer date ranges, your current version, Check for Updates, Settings, and Quit.
 
 ## What it does
 
@@ -50,8 +50,12 @@ Right-click the menu bar icon for longer date ranges, Settings, and Quit.
 - Left-click copies your availability for the default range
 - Right-click gives you Next week, Next fortnight, or Next 30 days
 - Option+click opens a preview so you can check the output before copying
-- Ctrl+Shift+C copies from anywhere without touching the mouse (configurable)
+- Ctrl+Shift+C copies from anywhere without touching the mouse (configurable, and it needs no Accessibility permission)
 - Reads every calendar synced to your Mac - iCloud, Google, Outlook, Exchange
+- Pastes rich into Mail, Google Docs, and Notion with bold day labels - plain editors get exactly the plain text
+- Times and day labels follow your locale - 24-hour locales get 24-hour output
+- Failed clicks tell you why - hover the icon and the tooltip names the reason
+- A "Get Availability" action for Shortcuts and Spotlight returns the text without touching your clipboard
 
 **Smart about what counts as "busy"**
 - Declined meetings don't block your time
@@ -83,14 +87,16 @@ No analytics. No tracking. No network connections. No data collection.
 
 The app reads your calendar locally through Apple's EventKit framework. Nothing leaves your Mac. It runs inside the macOS App Sandbox with calendar access as the only entitlement - network permissions aren't even granted. There is physically no way for it to phone home.
 
+One scoping note: the Shortcuts action hands your availability text to your own Shortcut, and what that Shortcut does with it - including sending it somewhere - is up to you. The app itself never calls the network. "Check for Updates" opens the GitHub releases page in your browser for the same reason.
+
 ## Technical details
 
 - Swift 6, SwiftUI + AppKit
-- EventKit, Combine, ServiceManagement
+- EventKit, AppIntents, ServiceManagement
 - Zero third-party dependencies
 - XcodeGen for project generation
 - macOS 14.0+ (Sonoma)
-- 98 tests across ten suites
+- 163 tests across nineteen suites
 - App Sandbox, Hardened Runtime, Developer ID signed and notarized
 
 ## Support
