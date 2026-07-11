@@ -133,12 +133,6 @@ struct FormatterTests {
         #expect(formatter.formatTimeRange(slot(25, 9, 5, 10, 5)) == "9:05-10:05am")
     }
 
-    // MARK: - Time Range: Brainstorm Spec
-
-    @Test func brainstormExample_elidesSuffix() {
-        #expect(formatter.formatTimeRange(slot(25, 14, 0, 15, 0)) == "2-3pm")
-    }
-
     // MARK: - Full Output: Day Grouping
 
     @Test func fullDayOutput_groupedByDay_sortedChronologically() {

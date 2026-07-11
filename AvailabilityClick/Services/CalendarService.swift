@@ -1,5 +1,4 @@
 @preconcurrency import EventKit
-import Combine
 import os
 
 @MainActor
@@ -7,16 +6,8 @@ final class CalendarService {
     static let shared = CalendarService()
     let store = EKEventStore()
 
-    private var changeObserver: AnyCancellable?
-    private var debouncedRefresh: AnyCancellable?
-    private let changeSubject = PassthroughSubject<Void, Never>()
-
-    /// Called when calendar data changes externally
-    var onStoreChanged: (() -> Void)?
-
     private init() {
         AppSettings.registerDefaults()
-        observeStoreChanges()
     }
 
     // MARK: - Authorization
@@ -91,22 +82,5 @@ final class CalendarService {
             )
             return unsafeStore.events(matching: predicate)
         }.value
-    }
-
-    // MARK: - Store Change Observation
-
-    private func observeStoreChanges() {
-        changeObserver = NotificationCenter.default
-            .publisher(for: .EKEventStoreChanged, object: store)
-            .sink { [weak self] _ in
-                self?.changeSubject.send()
-            }
-
-        debouncedRefresh = changeSubject
-            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
-            .sink { [weak self] in
-                self?.store.reset()
-                self?.onStoreChanged?()
-            }
     }
 }

@@ -99,10 +99,6 @@ enum AppSettings {
         UserDefaults.standard.stringArray(forKey: selectedCalendarIDsKey) ?? []
     }
 
-    static var launchAtLogin: Bool {
-        UserDefaults.standard.bool(forKey: launchAtLoginKey)
-    }
-
     // MARK: - V1.1 Settings
 
     static var roundingGranularity: Int {
