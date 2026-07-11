@@ -24,6 +24,7 @@
 		A3BDFC8977EFF647E701D0AD /* AvailabilityClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 569E959708F1407090998FA6 /* AvailabilityClickTests.swift */; };
 		B16C142E36CAAB9B67237AE8 /* PasteboardWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86D0BA75A5C3590A01E37BA3 /* PasteboardWriter.swift */; };
 		CC5C37DF0CCAAF4B1F87EC29 /* AvailabilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AE9A0A29A6E2EA167DB8D0 /* AvailabilityService.swift */; };
+		E61A3927CC287E538F2C11CB /* GetAvailabilitySlotsIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDB7351102C857CB2D3904BA /* GetAvailabilitySlotsIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,6 +55,7 @@
 		86D0BA75A5C3590A01E37BA3 /* PasteboardWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardWriter.swift; sourceTree = "<group>"; };
 		A050AD9B688ABDB99884D584 /* PreviewPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPopoverView.swift; sourceTree = "<group>"; };
 		B6B8312F6AD4714F2023A858 /* CalendarPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPickerView.swift; sourceTree = "<group>"; };
+		BDB7351102C857CB2D3904BA /* GetAvailabilitySlotsIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetAvailabilitySlotsIntent.swift; sourceTree = "<group>"; };
 		CE5B4D99DB879D1AABBDC26E /* GlobalShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutManager.swift; sourceTree = "<group>"; };
 		DF5A5A12C267F1DBB5CE9ED3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		EEACB52A8D6D2A3FEABED901 /* ShortcutRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderView.swift; sourceTree = "<group>"; };
@@ -148,11 +150,12 @@
 			isa = PBXGroup;
 			children = (
 				0D9591F2475B8190DD2D6521 /* GetAvailabilityIntent.swift */,
+				BDB7351102C857CB2D3904BA /* GetAvailabilitySlotsIntent.swift */,
 			);
 			path = Intents;
 			sourceTree = "<group>";
 		};
-		"TEMP_EEB9339B-18AE-4D63-8B9F-E12D85A6CBAC" /* .claude */ = {
+		"TEMP_32DE843E-175A-4E3B-BD4C-D545AA8D210F" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -253,6 +256,7 @@
 				28BF0364C582B8FA1F574BFC /* CalendarPickerView.swift in Sources */,
 				28682CCDFA643BF22D6928D5 /* CalendarService.swift in Sources */,
 				7410B3831AC832BEAC190D23 /* GetAvailabilityIntent.swift in Sources */,
+				E61A3927CC287E538F2C11CB /* GetAvailabilitySlotsIntent.swift in Sources */,
 				61DAA575EE41774A9F7712EB /* GlobalShortcutManager.swift in Sources */,
 				B16C142E36CAAB9B67237AE8 /* PasteboardWriter.swift in Sources */,
 				12BD38AC3BBC9939C643D03A /* PreviewPopoverView.swift in Sources */,

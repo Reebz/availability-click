@@ -25,6 +25,17 @@ enum AvailabilityRange: String, AppEnum {
         case .next30Days: .next30Days
         }
     }
+
+    /// Resolves the effective range for both intents (R9): an explicit
+    /// business-day count overrides the enum choice and is clamped to 2...30 in
+    /// code, so the result is well-defined whether the parameter's
+    /// `inclusiveRange` clamps or rejects out-of-range programmatic values.
+    static func dateRangeType(for range: AvailabilityRange, businessDays: Int?) -> DateRangeType {
+        if let businessDays {
+            return .businessDays(min(30, max(2, businessDays)))
+        }
+        return range.dateRangeType
+    }
 }
 
 enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
@@ -56,6 +67,15 @@ struct GetAvailabilityIntent: AppIntent {
     @Parameter(title: "Range", default: .defaultRange)
     var range: AvailabilityRange
 
+    /// Additive under KTD3: an optional business-day override, bounded 2...30.
+    /// nil leaves the Range parameter governing. Frozen once shipped.
+    @Parameter(
+        title: "Business days",
+        description: "Optional. Overrides the range with this many business days (2–30).",
+        inclusiveRange: (2, 30)
+    )
+    var businessDays: Int?
+
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         // A cold Shortcuts run launches the app headless; mark the launch so
@@ -75,7 +95,7 @@ struct GetAvailabilityIntent: AppIntent {
             throw GetAvailabilityError.noCalendarsAvailable
         }
 
-        let rangeType = range.dateRangeType
+        let rangeType = AvailabilityRange.dateRangeType(for: range, businessDays: businessDays)
         let service = AvailabilityService()
         let window = service.fetchWindow(for: rangeType)
         let events = await CalendarService.shared.fetchEvents(from: window.start, to: window.end)
@@ -98,6 +118,12 @@ struct AvailabilityClickShortcuts: AppShortcutsProvider {
             intent: GetAvailabilityIntent(),
             phrases: ["Get availability from \(.applicationName)"],
             shortTitle: "Get Availability",
+            systemImageName: "calendar"
+        )
+        AppShortcut(
+            intent: GetAvailabilitySlotsIntent(),
+            phrases: ["Get availability slots from \(.applicationName)"],
+            shortTitle: "Get Availability Slots",
             systemImageName: "calendar"
         )
     }

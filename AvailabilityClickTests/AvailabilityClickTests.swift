@@ -1412,6 +1412,61 @@ struct AppIntentMappingTests {
             #expect(window.end == cal.date(byAdding: .day, value: 7, to: today))
         }
     }
+
+    // MARK: - U8: Slots intent + automation contract (R8/R9/R10)
+
+    @Test func resolvedRange_businessDaysOverridesAndClamps() {
+        #expect(AvailabilityRange.dateRangeType(for: .nextWeek, businessDays: nil) == .nextWeek)
+        #expect(AvailabilityRange.dateRangeType(for: .nextWeek, businessDays: 7) == .businessDays(7))
+        #expect(AvailabilityRange.dateRangeType(for: .next30Days, businessDays: 1) == .businessDays(2))   // clamp low
+        #expect(AvailabilityRange.dateRangeType(for: .next30Days, businessDays: 31) == .businessDays(30)) // clamp high
+    }
+
+    @Test func slotEntity_mirrorsTimeSlotBoundaries() {
+        let s = slot(25, 9, 0, 10, 30)
+        let e = AvailabilitySlot(slot: s)
+        #expect(e.startDate == s.start)
+        #expect(e.endDate == s.end)
+        #expect(e.durationMinutes == 90)
+    }
+
+    @Test func slotEntity_displayTitleMatchesFormattedRange() {
+        let s = slot(25, 9, 0, 10, 30)
+        let e = AvailabilitySlot(slot: s)
+        // Same default-locale formatter the entity uses, so this is stable
+        // across machine locales while still proving the title renders the slot.
+        let expected = AvailabilityFormatter().formatTimeRange(s)
+        #expect(String(localized: e.displayRepresentation.title) == expected)
+    }
+
+    @Test func contractLock_frozenSurface() {
+        // Renaming any referenced symbol breaks compilation, so an accidental
+        // rename fails CI instead of shipping a broken contract (R10/KTD3).
+        #expect(String(describing: GetAvailabilityIntent.self) == "GetAvailabilityIntent")
+        #expect(String(describing: GetAvailabilitySlotsIntent.self) == "GetAvailabilitySlotsIntent")
+        #expect(String(describing: AvailabilitySlot.self) == "AvailabilitySlot")
+        #expect(String(localized: GetAvailabilityIntent.title) == "Get Availability")
+        #expect(String(localized: GetAvailabilitySlotsIntent.title) == "Get Availability Slots")
+
+        // Referencing each parameter and entity property locks its name.
+        var textIntent = GetAvailabilityIntent()
+        textIntent.range = .nextWeek
+        textIntent.businessDays = 5
+        var slotsIntent = GetAvailabilitySlotsIntent()
+        slotsIntent.range = .next30Days
+        slotsIntent.businessDays = 10
+        var s = AvailabilitySlot()
+        s.startDate = date(2026, 3, 25, 9, 0)
+        s.endDate = date(2026, 3, 25, 10, 0)
+        s.durationMinutes = 60
+        #expect(textIntent.businessDays == 5 && slotsIntent.businessDays == 10)
+        #expect(s.durationMinutes == 60)
+    }
+
+    @Test func bothIntents_requireLocalDeviceAuthentication() {
+        #expect(GetAvailabilityIntent.authenticationPolicy == .requiresLocalDeviceAuthentication)
+        #expect(GetAvailabilitySlotsIntent.authenticationPolicy == .requiresLocalDeviceAuthentication)
+    }
 }
 
 // ============================================================================

@@ -55,7 +55,7 @@ Right-click the menu bar icon for longer date ranges, your current version, Chec
 - Pastes rich into Mail, Google Docs, and Notion with bold day labels - plain editors get exactly the plain text
 - Times and day labels follow your locale - 24-hour locales get 24-hour output
 - Failed clicks tell you why - hover the icon and the tooltip names the reason
-- A "Get Availability" action for Shortcuts and Spotlight returns the text without touching your clipboard
+- Two Shortcuts and Spotlight actions - "Get Availability" returns the text, "Get Availability Slots" returns structured start/end times for automation - and neither touches your clipboard
 
 **Smart about what counts as "busy"**
 - Declined meetings don't block your time
@@ -80,6 +80,17 @@ Right-click the menu bar icon for longer date ranges, your current version, Chec
 - Timezone picker with search - convert to your recipient's local time before copying
 - Format toggle - switch between plain text and Markdown
 - Copy button puts exactly what you see on the clipboard.
+
+## Automation contract
+
+The Shortcuts actions are a stable contract. There are two:
+
+- **Get Availability** returns your free slots as formatted text.
+- **Get Availability Slots** returns them as structured entities - each with a raw `startDate`, `endDate`, and `durationMinutes` - so a Shortcut can compose its own output. The result card shows a formatted time range and your time zone; the value fields stay raw dates.
+
+Both take a **Range** (the same choices as the menu, plus your configured default) and an optional **Business days** override (2-30; out-of-range values are clamped). Both read your stored settings - buffer, calendar selection, rounding, minimum slot - so a Shortcut sees exactly what a click would. Both require the Mac to be unlocked, and neither writes to the clipboard.
+
+The names are frozen: intent names, parameter names, and entity property names will not be renamed or retyped, because a rename would break every Shortcut built on them. New parameters and new intents are the only way this surface evolves.
 
 ## Privacy
 
