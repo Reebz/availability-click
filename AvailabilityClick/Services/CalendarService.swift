@@ -1,6 +1,14 @@
 @preconcurrency import EventKit
 import os
 
+/// Carries a non-Sendable value across an isolation boundary the surrounding
+/// code has independently verified safe (documented-thread-safe EventKit
+/// reads).
+private final class UncheckedSendableBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
 @MainActor
 final class CalendarService {
     static let shared = CalendarService()
@@ -63,9 +71,11 @@ final class CalendarService {
 
     // MARK: - Event Fetching
 
-    // EKEvent/EKEventStore aren't Sendable in Swift 6 but events(matching:) is
-    // documented as thread-safe for reads. Suppress the unavoidable warnings.
-    @preconcurrency
+    // EKEvent/EKEventStore aren't Sendable in Swift 6 but events(matching:)
+    // is documented as thread-safe for reads. The unsafe captures carry the
+    // store into the detached task and the box carries the non-Sendable
+    // results back -- newer Swift compilers reject the bare [EKEvent] return
+    // as a sending violation (CI's Xcode errors where older ones warned).
     func fetchEvents(from start: Date, to end: Date) async -> [EKEvent] {
         guard isAuthorized else { return [] }
 
@@ -75,13 +85,14 @@ final class CalendarService {
         nonisolated(unsafe) let unsafeStore = store
         nonisolated(unsafe) let unsafeCalendars = calendars
 
-        return await Task.detached(priority: .userInitiated) {
+        let box = await Task.detached(priority: .userInitiated) { () -> UncheckedSendableBox<[EKEvent]> in
             let predicate = unsafeStore.predicateForEvents(
                 withStart: start,
                 end: end,
                 calendars: unsafeCalendars
             )
-            return unsafeStore.events(matching: predicate)
+            return UncheckedSendableBox(unsafeStore.events(matching: predicate))
         }.value
+        return box.value
     }
 }
