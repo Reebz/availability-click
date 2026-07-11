@@ -2,7 +2,12 @@
 set -euo pipefail
 
 # Release script for Availability Click
-# Usage: ./scripts/release.sh
+# Usage: ./scripts/release.sh [--update-cask-only]
+#
+#   --update-cask-only  Skip the build entirely: recompute the sha256 from
+#                       downloads/<dmg>, re-run the release-asset gate, and
+#                       perform only the cask bump/push. Run this after
+#                       `gh release create` has published the asset.
 #
 # Prerequisites:
 #   1. "Developer ID Application" certificate installed in Keychain
@@ -47,6 +52,70 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 DMG_NAME="availability-click_v${VERSION}.dmg"
+ASSET_URL="https://github.com/Reebz/availability-click/releases/download/v${VERSION}/${DMG_NAME}"
+
+# Gate (KTD7): the cask must never point at a GitHub release asset that does
+# not exist. Gate on curl exit status with -L, not a literal 200 check --
+# GitHub answers 302 to the CDN for live assets (OQ1). -f fails on 4xx/5xx.
+release_asset_is_live() {
+  curl -sfIL --max-time 30 "$ASSET_URL" > /dev/null
+}
+
+# Best-effort in the full release flow: a failed cask bump or push must NOT
+# fail the release. The DMG is already built, notarized, stapled, and copied
+# to downloads/. `git push origin HEAD` targets the tap's actual default
+# branch (main or master); the commit is guarded so an unchanged cask does
+# not abort with "nothing to commit". On any failure, warn and let the
+# caller decide -- returns nonzero so --update-cask-only can fail loudly.
+update_cask() {
+  local sha="$1"
+  CASK_FILE="$(brew --repo Reebz/availability-click)/Casks/availability-click.rb"
+  if [ -f "$CASK_FILE" ]; then
+    if (
+      set -e
+      sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$CASK_FILE"
+      sed -i '' "s/sha256 \".*\"/sha256 \"$sha\"/" "$CASK_FILE"
+      cd "$(dirname "$CASK_FILE")/.."
+      git add Casks/availability-click.rb
+      git diff --cached --quiet || git commit -m "update availability-click to v$VERSION"
+      git push origin HEAD
+    ); then
+      echo "    Cask updated and pushed: $sha"
+      return 0
+    else
+      echo "    WARNING: cask bump/push failed. Update the tap by hand."
+      echo "    version: $VERSION   sha256: $sha"
+      return 1
+    fi
+  else
+    echo "    WARNING: Cask file not found at $CASK_FILE"
+    echo "    Tap the cask repo first (brew tap Reebz/availability-click),"
+    echo "    or manually update sha256 to: $sha"
+    return 1
+  fi
+}
+
+# --update-cask-only: cask update without rebuilding anything.
+if [ "${1:-}" = "--update-cask-only" ]; then
+  DMG_LOCAL="$REPO_ROOT/downloads/$DMG_NAME"
+  if [ ! -f "$DMG_LOCAL" ]; then
+    echo "ERROR: $DMG_LOCAL not found. Run a full release first."
+    exit 1
+  fi
+  DMG_SHA256=$(shasum -a 256 "$DMG_LOCAL" | awk '{print $1}')
+  echo "==> Checking release asset is live: $ASSET_URL"
+  if ! release_asset_is_live; then
+    echo "ERROR: release asset is not live. Publish it first:"
+    echo "  gh release create v$VERSION \"downloads/$DMG_NAME\" --title \"v$VERSION\" --notes-file CHANGELOG.md"
+    exit 1
+  fi
+  echo "==> Updating Homebrew cask checksum..."
+  update_cask "$DMG_SHA256"
+  exit 0
+elif [ $# -gt 0 ]; then
+  echo "Usage: ./scripts/release.sh [--update-cask-only]"
+  exit 1
+fi
 
 echo "==> Regenerating Xcode project from project.yml..."
 (cd "$REPO_ROOT" && xcodegen generate)
@@ -193,31 +262,16 @@ SENTINEL="$BUILD_DIR/RELEASE_COMPLETE_v$VERSION"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SENTINEL"
 
 echo "==> Updating Homebrew cask checksum..."
-CASK_FILE="$(brew --repo Reebz/availability-click)/Casks/availability-click.rb"
-if [ -f "$CASK_FILE" ]; then
-  # Best-effort: a failed cask bump or push must NOT fail the release. The DMG is
-  # already built, notarized, stapled, and copied to downloads/. `git push origin
-  # HEAD` targets the tap's actual default branch (main or master); the commit is
-  # guarded so an unchanged cask does not abort with "nothing to commit". On any
-  # failure, warn and let the release finish — the tap can be updated by hand.
-  if (
-    set -e
-    sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$CASK_FILE"
-    sed -i '' "s/sha256 \".*\"/sha256 \"$DMG_SHA256\"/" "$CASK_FILE"
-    cd "$(dirname "$CASK_FILE")/.."
-    git add Casks/availability-click.rb
-    git diff --cached --quiet || git commit -m "update availability-click to v$VERSION"
-    git push origin HEAD
-  ); then
-    echo "    Cask updated and pushed: $DMG_SHA256"
-  else
-    echo "    WARNING: cask bump/push failed. Update the tap by hand."
-    echo "    version: $VERSION   sha256: $DMG_SHA256"
-  fi
+if release_asset_is_live; then
+  update_cask "$DMG_SHA256" || true
 else
-  echo "    WARNING: Cask file not found at $CASK_FILE"
-  echo "    Tap the cask repo first (brew tap Reebz/availability-click),"
-  echo "    or manually update sha256 to: $DMG_SHA256"
+  # Normal mid-release: `gh release create` is a documented manual step, so
+  # the asset usually is not live yet. Never push a cask at a 404.
+  echo "    Release asset not live yet (expected mid-release):"
+  echo "      $ASSET_URL"
+  echo "    Skipping cask push. version: $VERSION   sha256: $DMG_SHA256"
+  echo "    After publishing the GitHub release, run:"
+  echo "      ./scripts/release.sh --update-cask-only"
 fi
 
 echo ""
@@ -227,6 +281,7 @@ echo "Downloads: $DOWNLOADS_DIR/$DMG_NAME (staged, not committed)"
 echo "SHA-256:   $DMG_SHA256"
 echo "Sentinel:  $SENTINEL"
 echo ""
-echo "Next steps (run by hand):"
+echo "Next steps (run by hand, in this order):"
 echo "  1. Commit the DMG:   git commit -m \"release: v$VERSION DMG\" downloads/$DMG_NAME"
 echo "  2. Publish release:  gh release create v$VERSION \"$DMG_PATH\" --title \"v$VERSION\" --notes-file CHANGELOG.md"
+echo "  3. Update the cask:  ./scripts/release.sh --update-cask-only"
