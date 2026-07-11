@@ -20,6 +20,9 @@ enum AppSettings {
     static let globalShortcutKey = "globalShortcut"
     static let hasShownCoachmarkKey = "hasShownCoachmark"
 
+    // V1.2 keys
+    static let eventBufferMinutesKey = "eventBufferMinutes"
+
     // Defaults
     static let defaultWorkingHoursStart = 540   // 9:00 AM
     static let defaultWorkingHoursEnd = 1020    // 5:00 PM
@@ -30,9 +33,13 @@ enum AppSettings {
     static let defaultBusinessDayCount = 5
     static let defaultRoundingGranularity = 30  // 30 minutes
     static let defaultFormatValue = "plainText"
+    static let defaultEventBuffer = 0           // no padding around blocking events
 
     // Valid rounding values (0 = off)
     static let validRoundingValues = [0, 5, 10, 15, 30]
+
+    // Valid event-buffer values (0 = off)
+    static let validEventBufferValues = [0, 5, 10, 15]
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -51,6 +58,7 @@ enum AppSettings {
             recentTimezonesKey: [String](),
             globalShortcutKey: [String: Int](),
             hasShownCoachmarkKey: false,
+            eventBufferMinutesKey: defaultEventBuffer,
         ])
     }
 
@@ -144,5 +152,16 @@ enum AppSettings {
 
     static func setHasShownCoachmark() {
         UserDefaults.standard.set(true, forKey: hasShownCoachmarkKey)
+    }
+
+    // MARK: - V1.2 Settings
+
+    /// Padding applied around every blocking event before slot subtraction
+    /// (R7), so offered slots never butt against a meeting edge. Allowlist
+    /// read like `roundingGranularity`: an out-of-range stored value (e.g. a
+    /// stale 7) falls back to 0 (no padding).
+    static var eventBufferMinutes: Int {
+        let value = UserDefaults.standard.integer(forKey: eventBufferMinutesKey)
+        return validEventBufferValues.contains(value) ? value : defaultEventBuffer
     }
 }

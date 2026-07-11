@@ -13,6 +13,9 @@ struct SettingsView: View {
     @AppStorage(AppSettings.todayBufferMinutesKey)
     private var todayBufferMinutes = AppSettings.defaultTodayBuffer
 
+    @AppStorage(AppSettings.eventBufferMinutesKey)
+    private var eventBufferMinutes = AppSettings.defaultEventBuffer
+
     @AppStorage(AppSettings.defaultRangeModeKey)
     private var rangeMode = AppSettings.defaultRangeModeValue
 
@@ -44,6 +47,7 @@ struct SettingsView: View {
                 workingDaysSection
                 defaultRangeSection
                 todayBufferSection
+                eventBufferSection
                 slotRoundingSection
                 minimumSlotSection
                 CalendarPickerView()
@@ -158,6 +162,20 @@ struct SettingsView: View {
                 Text("1 hour").tag(60)
                 Text("2 hours").tag(120)
                 Text("4 hours").tag(240)
+            }
+            .frame(maxWidth: 200)
+        }
+    }
+
+    // MARK: - Event Buffer
+
+    private var eventBufferSection: some View {
+        SettingsSection("Event Buffer") {
+            Picker("Padding around meetings", selection: $eventBufferMinutes) {
+                Text("None").tag(0)
+                Text("5 minutes").tag(5)
+                Text("10 minutes").tag(10)
+                Text("15 minutes").tag(15)
             }
             .frame(maxWidth: 200)
         }

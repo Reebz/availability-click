@@ -484,6 +484,183 @@ struct SlotSubtractionTests {
 }
 
 // ============================================================================
+// MARK: - Event Buffer Padding Tests (R7)
+// ============================================================================
+
+@Suite("Event Buffer Padding")
+struct EventBufferTests {
+    let service = AvailabilityService()
+
+    private func workday(_ day: Int) -> (start: Date, end: Date) {
+        (date(2026, 3, day, 9, 0), date(2026, 3, day, 17, 0))
+    }
+
+    // MARK: - Pure padding transform
+
+    @Test func padsBothSidesByBuffer() {
+        let padded = service.paddedBlockingEvents([slot(25, 13, 0, 14, 0)], byMinutes: 10)
+        #expect(padded.count == 1)
+        #expect(padded[0].start == date(2026, 3, 25, 12, 50))
+        #expect(padded[0].end == date(2026, 3, 25, 14, 10))
+    }
+
+    @Test func zeroBuffer_returnsEventsUnchanged() {
+        let events = [slot(25, 13, 0, 14, 0), slot(25, 15, 0, 16, 0)]
+        let padded = service.paddedBlockingEvents(events, byMinutes: 0)
+        #expect(padded.count == 2)
+        #expect(padded[0].start == events[0].start && padded[0].end == events[0].end)
+        #expect(padded[1].start == events[1].start && padded[1].end == events[1].end)
+    }
+
+    // MARK: - Through subtractEvents
+
+    @Test func buffer10_slotsEndBeforeAndStartAfterMeeting() {
+        let work = workday(25)
+        let padded = service.paddedBlockingEvents([slot(25, 13, 0, 14, 0)], byMinutes: 10)
+        let result = service.subtractEvents(
+            from: TimeSlot(start: work.start, end: work.end),
+            events: padded, workStart: work.start, workEnd: work.end
+        )
+        #expect(result.count == 2)
+        #expect(result[0].end == date(2026, 3, 25, 12, 50))
+        #expect(result[1].start == date(2026, 3, 25, 14, 10))
+    }
+
+    @Test func padSwallowsShortGap_gapDropsOut() {
+        // 10:00-10:30 and 10:45-11:30 leave a 15-min gap; buffer 10 pads the
+        // first to ...-10:40 and the second to 10:35-..., overlapping the gap
+        // away. No slot may survive between 10:30 and 10:45.
+        let work = workday(25)
+        let padded = service.paddedBlockingEvents(
+            [slot(25, 10, 0, 10, 30), slot(25, 10, 45, 11, 30)], byMinutes: 10
+        )
+        let result = service.subtractEvents(
+            from: TimeSlot(start: work.start, end: work.end),
+            events: padded, workStart: work.start, workEnd: work.end
+        )
+        let gapSurvivor = result.first {
+            $0.start >= date(2026, 3, 25, 10, 30) && $0.start < date(2026, 3, 25, 10, 45)
+        }
+        #expect(gapSurvivor == nil)
+    }
+
+    @Test func eventAbuttingWorkEnd_paddedPastWindow_clampedNoOverhang() {
+        let work = workday(25)
+        let padded = service.paddedBlockingEvents([slot(25, 16, 0, 17, 0)], byMinutes: 10)
+        let result = service.subtractEvents(
+            from: TimeSlot(start: work.start, end: work.end),
+            events: padded, workStart: work.start, workEnd: work.end
+        )
+        #expect(result.count == 1)
+        #expect(result[0].start == date(2026, 3, 25, 9, 0))
+        #expect(result[0].end == date(2026, 3, 25, 15, 50))
+        for s in result { #expect(s.duration > 0) }
+    }
+
+    @Test func overlappingPaddedIntervals_subtractCleanly() {
+        // OQ1: adjacent events whose pads overlap must subtract without error.
+        let work = workday(25)
+        let padded = service.paddedBlockingEvents(
+            [slot(25, 10, 0, 11, 0), slot(25, 11, 10, 12, 0)], byMinutes: 10
+        )
+        let result = service.subtractEvents(
+            from: TimeSlot(start: work.start, end: work.end),
+            events: padded, workStart: work.start, workEnd: work.end
+        )
+        #expect(result.contains { $0.start == date(2026, 3, 25, 9, 0) && $0.end == date(2026, 3, 25, 9, 50) })
+        #expect(result.contains { $0.start == date(2026, 3, 25, 12, 10) && $0.end == date(2026, 3, 25, 17, 0) })
+        #expect(!result.contains { $0.start >= date(2026, 3, 25, 11, 0) && $0.start < date(2026, 3, 25, 12, 10) })
+    }
+
+    // MARK: - End-to-end through calculateAvailability
+
+    @Test func endToEnd_bufferShiftsSlotEdges() async {
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.eventBufferMinutesKey] = 10
+        pinned[AppSettings.roundingGranularityKey] = 0  // isolate the buffer effect
+        await withPinnedSettings(pinned) {
+            let store = EKEventStore()
+            let meeting = EKEvent(eventStore: store)
+            meeting.startDate = date(2026, 3, 25, 13, 0)
+            meeting.endDate = date(2026, 3, 25, 14, 0)
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let result = service.calculateAvailability(
+                events: [meeting], rangeType: .businessDays(1), now: wedMorning
+            )
+            let slots = result[date(2026, 3, 25)]!
+            #expect(slots.contains { $0.end == date(2026, 3, 25, 12, 50) })
+            #expect(slots.contains { $0.start == date(2026, 3, 25, 14, 10) })
+        }
+    }
+
+    @Test func defaultZeroBuffer_matchesNoBufferBaseline() async {
+        var pinned: [String: Any] = stockWorkingSettings  // rounding 30
+        pinned[AppSettings.eventBufferMinutesKey] = 0
+        await withPinnedSettings(pinned) {
+            let store = EKEventStore()
+            let meeting = EKEvent(eventStore: store)
+            meeting.startDate = date(2026, 3, 25, 13, 0)
+            meeting.endDate = date(2026, 3, 25, 14, 0)
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let result = service.calculateAvailability(
+                events: [meeting], rangeType: .businessDays(1), now: wedMorning
+            )
+            let slots = result[date(2026, 3, 25)]!
+            // Edges land exactly on the meeting boundaries — no padding.
+            #expect(slots.contains { $0.end == date(2026, 3, 25, 13, 0) })
+            #expect(slots.contains { $0.start == date(2026, 3, 25, 14, 0) })
+        }
+    }
+
+    @Test func nonBlockingEvents_notPadded() async {
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.eventBufferMinutesKey] = 15
+        await withPinnedSettings(pinned) {
+            // An all-day event is non-blocking (EKEvent.availability = .free
+            // won't stick without a supporting calendar; isAllDay reliably
+            // does). It must be filtered before padding — no 15-min carve-out.
+            let store = EKEventStore()
+            let allDay = EKEvent(eventStore: store)
+            allDay.isAllDay = true
+            allDay.startDate = date(2026, 3, 25)
+            allDay.endDate = date(2026, 3, 26)
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let result = service.calculateAvailability(
+                events: [allDay], rangeType: .businessDays(1), now: wedMorning
+            )
+            let slots = result[date(2026, 3, 25)]!
+            #expect(slots.count == 1)
+            #expect(slots[0].start == date(2026, 3, 25, 9, 0))
+            #expect(slots[0].end == date(2026, 3, 25, 17, 0))
+        }
+    }
+
+    @Test func bufferRoundMinSlotTriple_gapExactlyAtMinimum_survives() async {
+        var pinned: [String: Any] = stockWorkingSettings  // rounding 30, minSlot 30
+        pinned[AppSettings.eventBufferMinutesKey] = 5
+        await withPinnedSettings(pinned) {
+            let store = EKEventStore()
+            let a = EKEvent(eventStore: store)
+            a.startDate = date(2026, 3, 25, 9, 0)
+            a.endDate = date(2026, 3, 25, 10, 40)
+            let b = EKEvent(eventStore: store)
+            b.startDate = date(2026, 3, 25, 11, 40)
+            b.endDate = date(2026, 3, 25, 17, 0)
+            let wedMorning = date(2026, 3, 25, 8, 0)
+            let result = service.calculateAvailability(
+                events: [a, b], rangeType: .businessDays(1), now: wedMorning
+            )
+            // pad(5): free 10:45-11:35 → round(30): 11:00-11:30 = exactly the
+            // 30-min minimum, so the slot survives as the day's only slot.
+            let slots = result[date(2026, 3, 25)]!
+            #expect(slots.count == 1)
+            #expect(slots[0].start == date(2026, 3, 25, 11, 0))
+            #expect(slots[0].end == date(2026, 3, 25, 11, 30))
+        }
+    }
+}
+
+// ============================================================================
 // MARK: - Date Range Calculation Tests
 // ============================================================================
 
@@ -1071,6 +1248,20 @@ struct RealKeySettingsBoundsTests {
         await withPinnedSettings([AppSettings.defaultFormatKey: "markdown"]) {
             #expect(AppSettings.defaultFormat == "markdown")
             #expect(AppSettings.defaultFormatTemplate == .markdown)
+        }
+    }
+
+    @Test func eventBufferMinutes_invalidValue_fallsBackToZero() async {
+        await withPinnedSettings([AppSettings.eventBufferMinutesKey: 7]) {
+            #expect(AppSettings.eventBufferMinutes == 0)
+        }
+    }
+
+    @Test func eventBufferMinutes_validValues_pass() async {
+        for valid in AppSettings.validEventBufferValues {
+            await withPinnedSettings([AppSettings.eventBufferMinutesKey: valid]) {
+                #expect(AppSettings.eventBufferMinutes == valid)
+            }
         }
     }
 }

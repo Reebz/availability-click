@@ -49,6 +49,7 @@ struct AvailabilityService {
         let startMinutes = AppSettings.workingHoursStart
         let endMinutes = AppSettings.workingHoursEnd
         let bufferMinutes = AppSettings.todayBufferMinutes
+        let eventBufferMinutes = AppSettings.eventBufferMinutes
         let minimumSlot = TimeInterval(AppSettings.minimumSlotMinutes * 60)
 
         guard endMinutes > startMinutes else { return [:] }
@@ -80,7 +81,7 @@ struct AvailabilityService {
                 if workStart >= workEnd { continue }
             }
 
-            let dayEvents = eventsByDay[dayStart] ?? []
+            let dayEvents = paddedBlockingEvents(eventsByDay[dayStart] ?? [], byMinutes: eventBufferMinutes)
             let freeSlots = subtractEvents(
                 from: TimeSlot(start: workStart, end: workEnd),
                 events: dayEvents,
@@ -286,6 +287,24 @@ struct AvailabilityService {
             }
         }
         return days
+    }
+
+    // MARK: - Event Buffer Padding
+
+    /// Pads every blocking interval by `bufferMinutes` on each side before
+    /// subtraction (R7), so an offered slot never starts or ends flush against
+    /// a meeting. Pure; runs only on already-filtered blocking events, so
+    /// non-blocking ones (all-day, declined, free) are never padded into false
+    /// busy time. `subtractEvents` clamps the expanded intervals back to
+    /// `[workStart, workEnd]`, so an event abutting the window edge can't leave
+    /// an overhang or a negative-duration slot; overlapping pads subtract
+    /// cleanly (same interval-difference path as ordinary overlapping events).
+    func paddedBlockingEvents(_ events: [TimeSlot], byMinutes bufferMinutes: Int) -> [TimeSlot] {
+        guard bufferMinutes > 0 else { return events }
+        let pad = TimeInterval(bufferMinutes * 60)
+        return events.map {
+            TimeSlot(start: $0.start.addingTimeInterval(-pad), end: $0.end.addingTimeInterval(pad))
+        }
     }
 
     // MARK: - Slot Subtraction
