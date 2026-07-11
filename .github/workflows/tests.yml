@@ -10,6 +10,7 @@ jobs:
     # Swift 6 and the xcodegen-emitted project format need Xcode 16;
     # macos-14's default toolchain is Xcode 15 and cannot open the project.
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Select newest Xcode 16

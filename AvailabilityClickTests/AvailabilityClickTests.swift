@@ -19,19 +19,63 @@ private func slot(_ day: Int, _ startHour: Int, _ startMin: Int, _ endHour: Int,
     )
 }
 
+/// Non-blocking mutual exclusion for settings-pinning tests. An NSLock here
+/// deadlocked Swift Testing's cooperative thread pool (reproduced locally
+/// twice and on CI): waiters park pool threads while the holder's
+/// UserDefaults write can itself wait on the blocked main thread. Suspending
+/// via continuations instead of blocking breaks the cycle.
+private final class AsyncGate: @unchecked Sendable {
+    // Guards only the tiny state transitions below, never held across body.
+    private let lock = NSLock()
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if busy {
+                waiters.append(continuation)
+                lock.unlock()
+            } else {
+                busy = true
+                lock.unlock()
+                continuation.resume()
+            }
+        }
+    }
+
+    func release() {
+        lock.lock()
+        if waiters.isEmpty {
+            busy = false
+            lock.unlock()
+        } else {
+            let next = waiters.removeFirst()
+            lock.unlock()
+            next.resume()
+        }
+    }
+}
+
 /// Swift Testing runs suites in parallel, and every pinned key lives in the
 /// app's ONE real defaults domain -- unsynchronized pins from two suites
 /// would clobber each other (and could leak wrong values into the
 /// developer's live settings on restore).
-private let pinnedSettingsLock = NSLock()
+private let settingsGate = AsyncGate()
 
 /// Pins AppSettings-backed defaults to known values for the duration of
 /// `body`, then restores whatever was there before. TEST_HOST is the real
 /// app bundle, so UserDefaults.standard is the developer's live settings --
 /// tests that read AppSettings must not depend on (or clobber) them.
-private func withPinnedSettings(_ overrides: [String: Any], run body: () -> Void) {
-    pinnedSettingsLock.lock()
-    defer { pinnedSettingsLock.unlock() }
+/// Inherits the caller's isolation so MainActor suites can pass their
+/// closures without a Sendable hop.
+private func withPinnedSettings(
+    _ overrides: [String: Any],
+    isolation: isolated (any Actor)? = #isolation,
+    run body: () -> Void
+) async {
+    await settingsGate.acquire()
+    defer { settingsGate.release() }
 
     let defaults = UserDefaults.standard
     let originals = overrides.keys.map { ($0, defaults.object(forKey: $0)) }
@@ -625,8 +669,8 @@ struct RangeTests {
     // Regression: a Friday-evening click in this-week mode used to return an
     // empty result (failure flash) instead of rolling to next week as the
     // README promises. Relies on registered defaults (work end 5pm, buffer 1h).
-    @Test func thisWeek_fridayEvening_rollsToNextWeek() {
-        withPinnedSettings(stockWorkingSettings) {
+    @Test func thisWeek_fridayEvening_rollsToNextWeek() async {
+        await withPinnedSettings(stockWorkingSettings) {
             let friEvening = date(2026, 3, 27, 18)
             let days = service.businessDaysForRange(.thisWeek, from: friEvening, workingDays: monFri)
             #expect(days.count == 5)
@@ -635,8 +679,8 @@ struct RangeTests {
         }
     }
 
-    @Test func thisWeek_fridayNoon_stillIncludesFriday() {
-        withPinnedSettings(stockWorkingSettings) {
+    @Test func thisWeek_fridayNoon_stillIncludesFriday() async {
+        await withPinnedSettings(stockWorkingSettings) {
             let friNoon = date(2026, 3, 27, 12)
             let days = service.businessDaysForRange(.thisWeek, from: friNoon, workingDays: monFri)
             #expect(days.count == 1)
@@ -655,8 +699,8 @@ struct AvailabilityCalculationTests {
     // End-to-end with no events: today is buffered, future days get the full
     // working window. Relies on registered defaults (9-5, buffer 1h,
     // rounding 30, minimum slot 30).
-    @Test func emptyEvents_todayIsBuffered() {
-        withPinnedSettings(stockWorkingSettings) {
+    @Test func emptyEvents_todayIsBuffered() async {
+        await withPinnedSettings(stockWorkingSettings) {
             let monNoon = date(2026, 3, 23, 12)
             let result = service.calculateAvailability(events: [], rangeType: .businessDays(1), now: monNoon)
             let today = cal.startOfDay(for: monNoon)
@@ -667,8 +711,8 @@ struct AvailabilityCalculationTests {
         }
     }
 
-    @Test func emptyEvents_futureDayGetsFullWindow() {
-        withPinnedSettings(stockWorkingSettings) {
+    @Test func emptyEvents_futureDayGetsFullWindow() async {
+        await withPinnedSettings(stockWorkingSettings) {
             let monNoon = date(2026, 3, 23, 12)
             let result = service.calculateAvailability(events: [], rangeType: .businessDays(2), now: monNoon)
             let tuesday = date(2026, 3, 24)
@@ -869,8 +913,8 @@ struct SlotRoundingTests {
 
     // MARK: - Rounding Integration (end-to-end through calculateAvailability)
 
-    @Test func slotDropped_whenRoundingMakesStartGteEnd_dayAbsentEndToEnd() {
-        withPinnedSettings(stockWorkingSettings) {
+    @Test func slotDropped_whenRoundingMakesStartGteEnd_dayAbsentEndToEnd() async {
+        await withPinnedSettings(stockWorkingSettings) {
             // Busy 9:00-10:47 and 10:52-17:00 leave only a 5-minute gap;
             // 30-min rounding collapses it (start 11:00 >= end 10:30), so the
             // whole day must be absent from the result, not just the slot.
@@ -984,47 +1028,47 @@ struct EventFilterMatrixTests {
 
 @Suite("Real-Key Settings Bounds", .serialized)
 struct RealKeySettingsBoundsTests {
-    @Test func roundingGranularity_invalidValue_fallsBackToDefault() {
-        withPinnedSettings([AppSettings.roundingGranularityKey: 7]) {
+    @Test func roundingGranularity_invalidValue_fallsBackToDefault() async {
+        await withPinnedSettings([AppSettings.roundingGranularityKey: 7]) {
             #expect(AppSettings.roundingGranularity == AppSettings.defaultRoundingGranularity)
         }
     }
 
-    @Test func roundingGranularity_validValues_pass() {
+    @Test func roundingGranularity_validValues_pass() async {
         for valid in AppSettings.validRoundingValues {
-            withPinnedSettings([AppSettings.roundingGranularityKey: valid]) {
+            await withPinnedSettings([AppSettings.roundingGranularityKey: valid]) {
                 #expect(AppSettings.roundingGranularity == valid)
             }
         }
     }
 
-    @Test func minimumSlotMinutes_outOfBounds_fallsBackToDefault() {
-        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 5]) {
+    @Test func minimumSlotMinutes_outOfBounds_fallsBackToDefault() async {
+        await withPinnedSettings([AppSettings.minimumSlotMinutesKey: 5]) {
             #expect(AppSettings.minimumSlotMinutes == AppSettings.defaultMinimumSlot)
         }
-        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 999]) {
+        await withPinnedSettings([AppSettings.minimumSlotMinutesKey: 999]) {
             #expect(AppSettings.minimumSlotMinutes == AppSettings.defaultMinimumSlot)
         }
     }
 
-    @Test func minimumSlotMinutes_boundaryValues_pass() {
-        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 15]) {
+    @Test func minimumSlotMinutes_boundaryValues_pass() async {
+        await withPinnedSettings([AppSettings.minimumSlotMinutesKey: 15]) {
             #expect(AppSettings.minimumSlotMinutes == 15)
         }
-        withPinnedSettings([AppSettings.minimumSlotMinutesKey: 120]) {
+        await withPinnedSettings([AppSettings.minimumSlotMinutesKey: 120]) {
             #expect(AppSettings.minimumSlotMinutes == 120)
         }
     }
 
-    @Test func defaultFormat_unknownValue_fallsBackToPlainText() {
-        withPinnedSettings([AppSettings.defaultFormatKey: "yaml"]) {
+    @Test func defaultFormat_unknownValue_fallsBackToPlainText() async {
+        await withPinnedSettings([AppSettings.defaultFormatKey: "yaml"]) {
             #expect(AppSettings.defaultFormat == "plainText")
             #expect(AppSettings.defaultFormatTemplate == .plainText)
         }
     }
 
-    @Test func defaultFormat_markdown_passes() {
-        withPinnedSettings([AppSettings.defaultFormatKey: "markdown"]) {
+    @Test func defaultFormat_markdown_passes() async {
+        await withPinnedSettings([AppSettings.defaultFormatKey: "markdown"]) {
             #expect(AppSettings.defaultFormat == "markdown")
             #expect(AppSettings.defaultFormatTemplate == .markdown)
         }
@@ -1091,8 +1135,8 @@ struct FirstRunCoachTests {
         #expect(!AppDelegate.coachmarkNeeded(hasShownCoachmark: true, intentDrivenLaunch: true))
     }
 
-    @Test func coachFlag_persistsOnceSet() {
-        withPinnedSettings([AppSettings.hasShownCoachmarkKey: false]) {
+    @Test func coachFlag_persistsOnceSet() async {
+        await withPinnedSettings([AppSettings.hasShownCoachmarkKey: false]) {
             #expect(!AppSettings.hasShownCoachmark)
             AppSettings.setHasShownCoachmark()
             #expect(AppSettings.hasShownCoachmark)
@@ -1112,8 +1156,8 @@ struct AppIntentMappingTests {
         #expect(AvailabilityRange.next30Days.dateRangeType == .next30Days)
     }
 
-    @Test func defaultRange_followsBusinessDaysSetting() {
-        withPinnedSettings([
+    @Test func defaultRange_followsBusinessDaysSetting() async {
+        await withPinnedSettings([
             AppSettings.defaultRangeModeKey: "businessDays",
             AppSettings.defaultBusinessDaysKey: 7,
         ]) {
@@ -1121,16 +1165,16 @@ struct AppIntentMappingTests {
         }
     }
 
-    @Test func defaultRange_followsThisWeekSetting() {
-        withPinnedSettings([AppSettings.defaultRangeModeKey: "thisWeek"]) {
+    @Test func defaultRange_followsThisWeekSetting() async {
+        await withPinnedSettings([AppSettings.defaultRangeModeKey: "thisWeek"]) {
             #expect(AvailabilityRange.defaultRange.dateRangeType == .thisWeek)
         }
     }
 
-    @Test func fetchWindow_coversSameDayListAsAvailabilityMath() {
+    @Test func fetchWindow_coversSameDayListAsAvailabilityMath() async {
         var pinned: [String: Any] = stockWorkingSettings
         pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
-        withPinnedSettings(pinned) {
+        await withPinnedSettings(pinned) {
             let service = AvailabilityService()
             let wedNoon = date(2026, 3, 25, 12)
             let window = service.fetchWindow(for: .businessDays(3), now: wedNoon)
@@ -1142,8 +1186,8 @@ struct AppIntentMappingTests {
         }
     }
 
-    @Test func fetchWindow_emptyDayList_fallsBackToOneWeek() {
-        withPinnedSettings([AppSettings.workingDaysKey: [Int]()]) {
+    @Test func fetchWindow_emptyDayList_fallsBackToOneWeek() async {
+        await withPinnedSettings([AppSettings.workingDaysKey: [Int]()]) {
             let service = AvailabilityService()
             let wedNoon = date(2026, 3, 25, 12)
             let window = service.fetchWindow(for: .businessDays(3), now: wedNoon)
