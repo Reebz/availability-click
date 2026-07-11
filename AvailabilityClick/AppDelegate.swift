@@ -30,6 +30,35 @@ enum CopyOutcome: Equatable {
     }
 }
 
+/// Persistent status-icon state that outlives the 1.5s outcome flash (U5,
+/// KTD7). The flash reverts TO this baseline, never past it. Its symbols must
+/// stay distinct from every `CopyOutcome` symbol so the two layers never look
+/// alike (`calendar.badge.exclamationmark` is already taken by `.noCalendars`).
+enum AttentionState: Equatable {
+    case none
+    case calendarsUnavailable   // every saved calendar went stale (R11)
+    case copiedSlotStale        // a copied slot is no longer free (R5)
+
+    /// nil for `.none` (the icon falls back to its plain base image);
+    /// otherwise a badged SF Symbol drawn in template mode.
+    var symbolName: String? {
+        switch self {
+        case .none: nil
+        case .calendarsUnavailable: "calendar.badge.minus"
+        case .copiedSlotStale: "exclamationmark.circle"
+        }
+    }
+
+    /// The explanation shown while the badge stands; nil for `.none`.
+    var tooltip: String? {
+        switch self {
+        case .none: nil
+        case .calendarsUnavailable: "Your selected calendars are no longer available — pick calendars in Settings"
+        case .copiedSlotStale: "A time you copied is no longer free — copy again for current availability"
+        }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController!

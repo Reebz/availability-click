@@ -324,7 +324,9 @@ final class StatusItemController: NSObject {
 
     /// Flashes the outcome symbol and sets the button tooltip to the failure
     /// reason. The tooltip is written on every outcome (nil on success) so
-    /// stale failure text never lingers past the next attempt (KTD3).
+    /// stale failure text never lingers past the next attempt (KTD3). The
+    /// flash reverts to the attention-aware baseline, not the raw base image,
+    /// so a persistent badge survives an overlapping flash (KTD7).
     func showOutcome(_ outcome: CopyOutcome) {
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         let image = NSImage(systemSymbolName: outcome.symbolName, accessibilityDescription: nil)?
@@ -337,9 +339,59 @@ final class StatusItemController: NSObject {
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.statusItem.button?.image = self?.baseImage
+                guard let self else { return }
+                self.animationTimer = nil
+                self.applyAttentionBaseline()
             }
         }
+    }
+
+    // MARK: - Persistent Attention State (U5, KTD7)
+
+    /// The badge that outlives the flash. Read-only outside the controller so
+    /// AppDelegate drives it only through set/clear.
+    private(set) var attentionState: AttentionState = .none
+
+    /// The badged image for a state, drawn in template mode (no NSStatusItem
+    /// badge API — a symbol swap is the convention). Static and independent of
+    /// `baseImage` so it is unit-testable without a live status item; `.none`
+    /// returns nil and the caller falls back to `baseImage`.
+    static func attentionSymbolImage(for state: AttentionState) -> NSImage? {
+        guard let symbol = state.symbolName else { return nil }
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image
+    }
+
+    /// The at-rest image for the current attention state: the badge when set,
+    /// the plain base icon otherwise.
+    private func attentionImage() -> NSImage? {
+        Self.attentionSymbolImage(for: attentionState) ?? baseImage
+    }
+
+    /// Paints the current attention baseline (image + tooltip). Called when no
+    /// flash is animating and when a flash ends.
+    private func applyAttentionBaseline() {
+        statusItem?.button?.image = attentionImage()
+        statusItem?.button?.toolTip = attentionState.tooltip
+    }
+
+    /// Sets the persistent badge. Idempotent. If a flash is mid-animation the
+    /// paint is deferred — the flash's completion reverts to this new
+    /// baseline, so the badge is never lost.
+    func setAttention(_ state: AttentionState) {
+        guard attentionState != state else { return }
+        attentionState = state
+        if animationTimer == nil {
+            applyAttentionBaseline()
+        }
+    }
+
+    /// Clears the badge back to the plain icon.
+    func clearAttention() {
+        setAttention(.none)
     }
 }
 

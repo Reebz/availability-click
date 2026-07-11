@@ -1835,6 +1835,60 @@ struct CopyOutcomeTests {
         )
         #expect(symbols.count == 4)
     }
+
+    @Test func attentionAndOutcomeSymbols_allDistinct() {
+        // The persistent-badge layer must never look like an outcome flash.
+        let outcomeSymbols = [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots].map(\.symbolName)
+        let attentionSymbols = [AttentionState.calendarsUnavailable, .copiedSlotStale].compactMap(\.symbolName)
+        let all = outcomeSymbols + attentionSymbols
+        #expect(all.count == 6)
+        #expect(Set(all).count == all.count)
+    }
+
+    @Test func attentionStates_tooltipsAndSymbols() {
+        #expect(AttentionState.none.tooltip == nil)
+        #expect(AttentionState.none.symbolName == nil)
+        #expect(AttentionState.calendarsUnavailable.tooltip?.isEmpty == false)
+        #expect(AttentionState.copiedSlotStale.tooltip?.isEmpty == false)
+    }
+}
+
+// ============================================================================
+// MARK: - Attention State Tests (U5, KTD7)
+// ============================================================================
+
+@Suite("Attention State")
+@MainActor
+struct AttentionStateTests {
+    @Test func setThenClear_updatesState() {
+        let c = StatusItemController()
+        #expect(c.attentionState == .none)
+        c.setAttention(.calendarsUnavailable)
+        #expect(c.attentionState == .calendarsUnavailable)
+        c.clearAttention()
+        #expect(c.attentionState == .none)
+    }
+
+    @Test func settingSameStateTwice_idempotent() {
+        let c = StatusItemController()
+        c.setAttention(.copiedSlotStale)
+        c.setAttention(.copiedSlotStale)
+        #expect(c.attentionState == .copiedSlotStale)
+    }
+
+    @Test func clearWhenNone_isNoOp() {
+        let c = StatusItemController()
+        c.clearAttention()
+        #expect(c.attentionState == .none)
+    }
+
+    @Test func badgedImage_builtForSetStates_nilForNone_template() {
+        #expect(StatusItemController.attentionSymbolImage(for: .none) == nil)
+        let cal = StatusItemController.attentionSymbolImage(for: .calendarsUnavailable)
+        let stale = StatusItemController.attentionSymbolImage(for: .copiedSlotStale)
+        #expect(cal != nil && cal?.isTemplate == true)
+        #expect(stale != nil && stale?.isTemplate == true)
+    }
 }
 
 // ============================================================================
