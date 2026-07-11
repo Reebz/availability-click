@@ -45,6 +45,10 @@ final class StatusItemController: NSObject {
     // MARK: - Click Handling
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
+        // Dismissed here, not via transient outside-click, so the user's
+        // first gesture both closes the coach AND executes (OQ3).
+        dismissCoachmark()
+
         guard let event = NSApp.currentEvent else { return }
 
         if event.type == .rightMouseUp {
@@ -73,6 +77,18 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
+        // Disabled version line (nil action): what makes the browser-based
+        // update check meaningful -- the user can compare against the
+        // releases page (KTD9).
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        menu.addItem(NSMenuItem(title: "Availability Click v\(version)", action: nil, keyEquivalent: ""))
+
+        let updatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
+        updatesItem.target = self
+        menu.addItem(updatesItem)
+
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -97,6 +113,14 @@ final class StatusItemController: NSObject {
 
     @objc private func copyNext30Days() {
         onRangeSelected?(.next30Days)
+    }
+
+    @objc private func checkForUpdates() {
+        // Honest naming (KTD9): opens the releases page in the browser --
+        // the app itself never calls the network.
+        if let url = URL(string: "https://github.com/Reebz/availability-click/releases") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func openSettings() {
@@ -224,6 +248,42 @@ final class StatusItemController: NSObject {
         }
     }
 
+    // MARK: - First-Run Coach (KTD8)
+
+    private var coachPopover: NSPopover?
+    private var coachDismissMonitor: Any?
+
+    func showCoachmark() {
+        guard coachPopover == nil, let button = statusItem.button else { return }
+
+        let popover = NSPopover()
+        popover.contentViewController = NSHostingController(rootView: CoachmarkView())
+        // applicationDefined, not transient: a transient popover would eat
+        // the first status-item click just to dismiss itself (OQ3).
+        popover.behavior = .applicationDefined
+        coachPopover = popover
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        // Any click elsewhere also dismisses. Mouse global monitors need no
+        // Accessibility grant (unlike key monitors).
+        coachDismissMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.dismissCoachmark()
+            }
+        }
+    }
+
+    private func dismissCoachmark() {
+        if let monitor = coachDismissMonitor {
+            NSEvent.removeMonitor(monitor)
+            coachDismissMonitor = nil
+        }
+        coachPopover?.close()
+        coachPopover = nil
+    }
+
     // MARK: - Feedback Animation
 
     /// Flashes the outcome symbol and sets the button tooltip to the failure
@@ -244,5 +304,18 @@ final class StatusItemController: NSObject {
                 self?.statusItem.button?.image = self?.baseImage
             }
         }
+    }
+}
+
+/// One-time gesture coach shown under the status item (R11).
+private struct CoachmarkView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Left-click copies availability", systemImage: "cursorarrow.click")
+            Label("Right-click for ranges", systemImage: "filemenu.and.selection")
+            Label("Option+click previews", systemImage: "eye")
+        }
+        .font(.callout)
+        .padding(14)
     }
 }

@@ -18,6 +18,7 @@ enum AppSettings {
     static let defaultFormatKey = "defaultFormat"
     static let recentTimezonesKey = "recentTimezones"
     static let globalShortcutKey = "globalShortcut"
+    static let hasShownCoachmarkKey = "hasShownCoachmark"
 
     // Defaults
     static let defaultWorkingHoursStart = 540   // 9:00 AM
@@ -49,6 +50,7 @@ enum AppSettings {
             defaultFormatKey: defaultFormatValue,
             recentTimezonesKey: [String](),
             globalShortcutKey: [String: Int](),
+            hasShownCoachmarkKey: false,
         ])
     }
 
@@ -134,5 +136,13 @@ enum AppSettings {
 
     static var globalShortcut: [String: Int]? {
         UserDefaults.standard.dictionary(forKey: globalShortcutKey) as? [String: Int]
+    }
+
+    static var hasShownCoachmark: Bool {
+        UserDefaults.standard.bool(forKey: hasShownCoachmarkKey)
+    }
+
+    static func setHasShownCoachmark() {
+        UserDefaults.standard.set(true, forKey: hasShownCoachmarkKey)
     }
 }

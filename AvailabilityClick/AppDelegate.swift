@@ -80,12 +80,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func runUserVisibleLaunchSideEffects() {
         guard !Self.intentDidRunThisLaunch else { return }
 
-        // Request calendar access on first launch
-        Task {
-            if calendarService.authorizationStatus == .notDetermined {
+        if calendarService.authorizationStatus == .notDetermined {
+            Task { @MainActor in
                 _ = await calendarService.requestAccess()
+                // Coach only after the sheet resolves -- grant or deny, the
+                // gestures matter regardless. Raw launch timing would race
+                // the system permission sheet (KTD8).
+                showCoachmarkIfNeeded()
             }
+        } else {
+            // v1.0.0 upgraders: permission already determined, no sheet to
+            // race -- show immediately after status-item setup (OQ12).
+            showCoachmarkIfNeeded()
         }
+    }
+
+    /// Coach gating: only on a user-visible launch, only ever once,
+    /// independent of the permission outcome.
+    static func coachmarkNeeded(hasShownCoachmark: Bool, intentDrivenLaunch: Bool) -> Bool {
+        !intentDrivenLaunch && !hasShownCoachmark
+    }
+
+    private func showCoachmarkIfNeeded() {
+        guard Self.coachmarkNeeded(
+            hasShownCoachmark: AppSettings.hasShownCoachmark,
+            intentDrivenLaunch: Self.intentDidRunThisLaunch
+        ) else { return }
+
+        // Flag set immediately when shown -- a crash mid-display must not
+        // re-show it on the next launch (KTD8).
+        AppSettings.setHasShownCoachmark()
+        statusItemController.showCoachmark()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

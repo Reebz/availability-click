@@ -1067,6 +1067,31 @@ struct DateFromMinutesTests {
 }
 
 // ============================================================================
+// MARK: - First-Run Coach Tests (KTD8)
+// ============================================================================
+
+@Suite("First-Run Coach")
+@MainActor
+struct FirstRunCoachTests {
+    @Test func coachNeeded_onlyOnUserVisibleLaunch_onlyOnce() {
+        // Permission outcome is deliberately not an input: the gestures
+        // matter whether access was granted or denied.
+        #expect(AppDelegate.coachmarkNeeded(hasShownCoachmark: false, intentDrivenLaunch: false))
+        #expect(!AppDelegate.coachmarkNeeded(hasShownCoachmark: true, intentDrivenLaunch: false))
+        #expect(!AppDelegate.coachmarkNeeded(hasShownCoachmark: false, intentDrivenLaunch: true))
+        #expect(!AppDelegate.coachmarkNeeded(hasShownCoachmark: true, intentDrivenLaunch: true))
+    }
+
+    @Test func coachFlag_persistsOnceSet() {
+        withPinnedSettings([AppSettings.hasShownCoachmarkKey: false]) {
+            #expect(!AppSettings.hasShownCoachmark)
+            AppSettings.setHasShownCoachmark()
+            #expect(AppSettings.hasShownCoachmark)
+        }
+    }
+}
+
+// ============================================================================
 // MARK: - App Intent Mapping Tests (KTD6)
 // ============================================================================
 
