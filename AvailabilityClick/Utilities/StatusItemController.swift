@@ -353,8 +353,12 @@ final class StatusItemController: NSObject {
             .withSymbolConfiguration(config)
         image?.isTemplate = true
 
-        statusItem.button?.image = image
-        statusItem.button?.toolTip = outcome.tooltip
+        statusItem?.button?.image = image
+        statusItem?.button?.toolTip = outcome.tooltip
+
+        // User-triggered outcomes speak at high priority (R13). Posted once
+        // here, not per animation frame.
+        announce(outcome.announcementText, priority: .high)
 
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
@@ -407,6 +411,32 @@ final class StatusItemController: NSObject {
         if animationTimer == nil {
             applyAttentionBaseline()
         }
+        // Passive state changes speak at low priority so they don't interrupt
+        // (R13). Clearing to .none has no text, so it stays silent.
+        announce(state.announcementText, priority: .low)
+    }
+
+    // MARK: - VoiceOver Announcements (U10, R13)
+
+    /// Injectable so tests can spy on posting without a live accessibility
+    /// client. Defaults to a real `announcementRequested` post.
+    var postAccessibilityAnnouncement: (Any, String, NSAccessibilityPriorityLevel) -> Void = { element, text, priority in
+        NSAccessibility.post(
+            element: element,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: text,
+                .priority: priority.rawValue,
+            ]
+        )
+    }
+
+    /// Posts a VoiceOver announcement for `text` (skipped when nil/empty).
+    /// Element is the status-item button, falling back to the app.
+    private func announce(_ text: String?, priority: NSAccessibilityPriorityLevel) {
+        guard let text, !text.isEmpty else { return }
+        let element: Any = statusItem?.button ?? NSApp as Any
+        postAccessibilityAnnouncement(element, text, priority)
     }
 
     /// Clears the badge back to the plain icon.

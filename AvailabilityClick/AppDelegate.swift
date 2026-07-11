@@ -34,6 +34,13 @@ enum CopyOutcome: Equatable {
         case .availabilityChanged: "Availability changed since your last copy — click again to overwrite"
         }
     }
+
+    /// VoiceOver announcement (R13): the tooltip where one exists, and an
+    /// explicit success line since `.copied`'s tooltip is nil by design. The
+    /// icon stays the primary channel; this is additive.
+    var announcementText: String {
+        tooltip ?? "Availability copied"
+    }
 }
 
 /// Persistent status-icon state that outlives the 1.5s outcome flash (U5,
@@ -63,6 +70,9 @@ enum AttentionState: Equatable {
         case .copiedSlotStale: "A time you copied is no longer free — copy again for current availability"
         }
     }
+
+    /// VoiceOver announcement for a passive state change (R13); nil for `.none`.
+    var announcementText: String? { tooltip }
 }
 
 /// Trailing-debounce coalescer keyed by a monotonic generation token (KTD11):

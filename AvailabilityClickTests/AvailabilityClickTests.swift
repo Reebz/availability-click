@@ -1944,6 +1944,25 @@ struct CopyOutcomeTests {
         #expect(AttentionState.calendarsUnavailable.tooltip?.isEmpty == false)
         #expect(AttentionState.copiedSlotStale.tooltip?.isEmpty == false)
     }
+
+    // MARK: - Announcement mapping (U10/R13)
+
+    @Test func announcementText_successExplicit_failuresReuseTooltip() {
+        #expect(CopyOutcome.copied.announcementText == "Availability copied")
+        #expect(CopyOutcome.noAccess.announcementText == CopyOutcome.noAccess.tooltip)
+        #expect(CopyOutcome.noCalendars.announcementText == CopyOutcome.noCalendars.tooltip)
+        #expect(CopyOutcome.noSlots.announcementText == CopyOutcome.noSlots.tooltip)
+        #expect(CopyOutcome.availabilityChanged.announcementText == CopyOutcome.availabilityChanged.tooltip)
+    }
+
+    @Test func everyOutcomeAndAttention_hasNonEmptyAnnouncement() {
+        for o in [CopyOutcome.copied, .noAccess, .noCalendars, .noSlots, .availabilityChanged] {
+            #expect(!o.announcementText.isEmpty)
+        }
+        #expect(AttentionState.calendarsUnavailable.announcementText?.isEmpty == false)
+        #expect(AttentionState.copiedSlotStale.announcementText?.isEmpty == false)
+        #expect(AttentionState.none.announcementText == nil)
+    }
 }
 
 // ============================================================================
@@ -1991,6 +2010,51 @@ struct AttentionStateTests {
         #expect(c.attentionState == .copiedSlotStale)
         c.clearAttention(ifShowing: .copiedSlotStale)
         #expect(c.attentionState == .none)
+    }
+}
+
+// ============================================================================
+// MARK: - VoiceOver Announcement Tests (U10/R13)
+// ============================================================================
+
+@Suite("VoiceOver Announcements")
+@MainActor
+struct VoiceOverAnnouncementTests {
+    private func spyController() -> (StatusItemController, () -> [(String, NSAccessibilityPriorityLevel)]) {
+        let c = StatusItemController()
+        var posts: [(String, NSAccessibilityPriorityLevel)] = []
+        c.postAccessibilityAnnouncement = { _, text, priority in posts.append((text, priority)) }
+        return (c, { posts })
+    }
+
+    @Test func outcome_announcesOnceAtHighPriority() {
+        let (c, posts) = spyController()
+        c.showOutcome(.copied)
+        #expect(posts().count == 1)
+        #expect(posts()[0].0 == "Availability copied")
+        #expect(posts()[0].1 == .high)
+    }
+
+    @Test func failureOutcome_announcesTooltipVerbatimAtHigh() {
+        let (c, posts) = spyController()
+        c.showOutcome(.noAccess)
+        #expect(posts().last?.0 == CopyOutcome.noAccess.tooltip)
+        #expect(posts().last?.1 == .high)
+    }
+
+    @Test func attentionState_announcesAtLowPriority() {
+        let (c, posts) = spyController()
+        c.setAttention(.copiedSlotStale)
+        #expect(posts().count == 1)
+        #expect(posts().last?.0 == AttentionState.copiedSlotStale.announcementText)
+        #expect(posts().last?.1 == .low)
+    }
+
+    @Test func clearingAttention_isSilent() {
+        let (c, posts) = spyController()
+        c.setAttention(.calendarsUnavailable)
+        c.clearAttention()
+        #expect(posts().count == 1)  // the set spoke; clearing to .none is silent
     }
 }
 
