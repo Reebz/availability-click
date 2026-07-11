@@ -236,18 +236,7 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     private var timezoneLabel: String {
-        let tz = TimeZone.current
-        let abbrev = tz.abbreviation() ?? "UTC"
-        let seconds = tz.secondsFromGMT()
-        let hours = seconds / 3600
-        let minutes = abs(seconds / 60) % 60
-        let gmtOffset: String
-        if minutes == 0 {
-            gmtOffset = String(format: "GMT%+d", hours)
-        } else {
-            gmtOffset = String(format: "GMT%+d:%02d", hours, minutes)
-        }
-        return "\(abbrev), \(gmtOffset)"
+        AvailabilityFormatter.timezoneString()
     }
 
     private var timeOptions: [Int] {

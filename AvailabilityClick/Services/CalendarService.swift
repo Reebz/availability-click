@@ -1,5 +1,6 @@
 @preconcurrency import EventKit
 import Combine
+import os
 
 @MainActor
 final class CalendarService {
@@ -32,6 +33,10 @@ final class CalendarService {
         do {
             return try await store.requestFullAccessToEvents()
         } catch {
+            // A thrown error is a system failure, not a user denial -- leave a
+            // trace in Console.app so support isn't debugging a silent false.
+            Logger(subsystem: "com.availabilityclick.AvailabilityClick", category: "CalendarService")
+                .error("requestFullAccessToEvents failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

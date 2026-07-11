@@ -5,9 +5,7 @@ struct PreviewPopoverView: View {
     let onCopy: (String) -> Void
     let onDismiss: () -> Void
 
-    @State private var selectedFormat: FormatTemplate = {
-        AppSettings.defaultFormat == "markdown" ? .markdown : .plainText
-    }()
+    @State private var selectedFormat: FormatTemplate = AppSettings.defaultFormatTemplate
     @State private var selectedTimezone: TimeZone? = nil
     @State private var searchText = ""
 
@@ -149,14 +147,7 @@ struct PreviewPopoverView: View {
 
     private func tzDisplayName(_ tz: TimeZone) -> String {
         let name = tz.localizedName(for: .standard, locale: .current) ?? tz.identifier
-        let abbrev = tz.abbreviation() ?? ""
-        let seconds = tz.secondsFromGMT()
-        let hours = seconds / 3600
-        let mins = abs(seconds / 60) % 60
-        let offset = mins == 0
-            ? String(format: "GMT%+d", hours)
-            : String(format: "GMT%+d:%02d", hours, mins)
-        return "\(name) (\(abbrev), \(offset))"
+        return "\(name) (\(AvailabilityFormatter.timezoneString(for: tz)))"
     }
 
     private var filteredTimezones: [TimeZone] {

@@ -8,7 +8,11 @@ struct CalendarPickerView: View {
     var body: some View {
         SettingsSection("Calendars Enabled") {
             if calendars.isEmpty {
-                Text("No calendars found. Add calendar accounts in System Settings.")
+                Text(
+                    CalendarService.shared.isAuthorized
+                        ? "No calendars found. Add calendar accounts in System Settings."
+                        : "Calendar access not granted. Enable it in System Settings > Privacy & Security > Calendars."
+                )
                     .foregroundStyle(.secondary)
                     .font(.callout)
             } else {

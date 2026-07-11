@@ -24,7 +24,10 @@ struct ShortcutRecorderView: View {
             if !displayText.isEmpty {
                 Button("Clear") {
                     displayText = ""
-                    UserDefaults.standard.set([String: Int](), forKey: AppSettings.globalShortcutKey)
+                    // Explicit cleared sentinel -- distinct from the registered
+                    // default empty dict, which means "never customized" and
+                    // would resurrect the default shortcut on relaunch.
+                    UserDefaults.standard.set(["keyCode": 0, "modifiers": 0], forKey: AppSettings.globalShortcutKey)
                 }
                 .controlSize(.small)
             }
@@ -37,7 +40,8 @@ struct ShortcutRecorderView: View {
     private func loadSavedShortcut() {
         guard let saved = AppSettings.globalShortcut,
               let keyCode = saved["keyCode"],
-              let modifiers = saved["modifiers"] else { return }
+              let modifiers = saved["modifiers"],
+              keyCode != 0 || modifiers != 0 else { return }
 
         displayText = GlobalShortcutManager.displayString(
             keyCode: UInt16(keyCode),
@@ -86,6 +90,19 @@ private final class ShortcutNSView: NSView {
     private var isRecording = false
 
     override var acceptsFirstResponder: Bool { true }
+
+    // MARK: - Accessibility
+
+    override func isAccessibilityElement() -> Bool { true }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+
+    override func accessibilityLabel() -> String? { "Keyboard shortcut recorder" }
+
+    override func accessibilityValue() -> Any? {
+        if isRecording { return "Recording" }
+        return displayText.isEmpty ? "Click to record" : displayText
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)

@@ -63,7 +63,7 @@ Right-click the menu bar icon for longer date ranges, Settings, and Quit.
 **Configurable**
 - Working hours with 30-minute granularity (8:30am start, not just 9am)
 - Working days - any combination, not just Mon through Fri
-- Default range: "This week" or "Next 2-5 business days" with a slider
+- Default range: "This week" or "Next 2-30 business days" with a slider
 - Today buffer: minimum lead time before showing a slot (30 minutes to four hours)
 - Calendar selection: pick which calendars count as "busy"
 - Slot rounding: snap times to clean 5, 10, 15, or 30-minute boundaries
@@ -90,7 +90,7 @@ The app reads your calendar locally through Apple's EventKit framework. Nothing 
 - Zero third-party dependencies
 - XcodeGen for project generation
 - macOS 14.0+ (Sonoma)
-- 89 tests across eight suites
+- 98 tests across ten suites
 - App Sandbox, Hardened Runtime, Developer ID signed and notarized
 
 ## Support

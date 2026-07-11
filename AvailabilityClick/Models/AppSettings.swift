@@ -73,7 +73,9 @@ enum AppSettings {
     }
 
     static var defaultBusinessDays: Int {
-        clampedInt(forKey: defaultBusinessDaysKey, min: 2, max: 5, fallback: defaultBusinessDayCount)
+        // Bounds must match the Settings slider range (2...30) -- a narrower
+        // clamp silently falls back to 5 while the UI shows the chosen value.
+        clampedInt(forKey: defaultBusinessDaysKey, min: 2, max: 30, fallback: defaultBusinessDayCount)
     }
 
     static var minimumSlotMinutes: Int {
@@ -111,6 +113,10 @@ enum AppSettings {
     static var defaultFormat: String {
         let value = UserDefaults.standard.string(forKey: defaultFormatKey) ?? defaultFormatValue
         return ["plainText", "markdown"].contains(value) ? value : defaultFormatValue
+    }
+
+    static var defaultFormatTemplate: FormatTemplate {
+        defaultFormat == "markdown" ? .markdown : .plainText
     }
 
     static var recentTimezones: [String] {

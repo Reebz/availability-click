@@ -92,7 +92,13 @@ APP_PATH="$BUILD_DIR/export/$APP_NAME.app"
 
 echo "==> Verifying code signature (Hardened Runtime, Developer ID)..."
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-codesign --display --verbose=4 "$APP_PATH" 2>&1 | grep -E "Authority=Developer ID Application|flags=.*runtime" || true
+# Hard assertions: the old `grep ... || true` could never fail, so
+# "Signature OK" printed even for an ad-hoc, non-hardened signature.
+SIGN_INFO=$(codesign --display --verbose=4 "$APP_PATH" 2>&1)
+echo "$SIGN_INFO" | grep -q "Authority=Developer ID Application" \
+  || { echo "ERROR: signature is missing the Developer ID Application authority"; exit 1; }
+echo "$SIGN_INFO" | grep -Eq "flags=.*runtime" \
+  || { echo "ERROR: hardened runtime flag not set on the app signature"; exit 1; }
 echo "    Signature OK"
 
 echo "==> Creating DMG with Applications shortcut..."
@@ -113,7 +119,18 @@ hdiutil create -volname "$APP_NAME" \
 
 # Mount, set Finder layout, unmount
 MOUNT_DIR=$(hdiutil attach -readwrite -noverify "$DMG_TEMP" | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
-sleep 1
+if [ -z "$MOUNT_DIR" ]; then
+  echo "ERROR: failed to parse mount point from hdiutil attach"
+  exit 1
+fi
+# Detach on any failure below (AppleScript, convert) so a rerun doesn't
+# style a stale leftover volume and ship an unstyled DMG.
+trap 'hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true' EXIT
+# Wait for the volume to actually appear instead of guessing with a fixed sleep
+for _ in $(seq 1 20); do
+  [ -d "$MOUNT_DIR" ] && break
+  sleep 0.5
+done
 
 # Set Finder window appearance via AppleScript
 osascript <<APPLESCRIPT
@@ -140,6 +157,7 @@ APPLESCRIPT
 
 sync
 hdiutil detach "$MOUNT_DIR"
+trap - EXIT
 
 # Convert to compressed read-only DMG
 hdiutil convert "$DMG_TEMP" -format UDZO -o "$DMG_PATH"

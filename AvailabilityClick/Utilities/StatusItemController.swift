@@ -6,7 +6,13 @@ final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem!
     private var animationTimer: Timer?
     private var settingsWindow: NSWindow?
+    private var settingsCloseObserver: NSObjectProtocol?
     private var previewPopover: NSPopover?
+
+    /// The permanent menu bar icon. The flash animation restores this constant
+    /// instead of whatever the button showed when the flash started, so two
+    /// overlapping flashes can't freeze the icon on a checkmark.
+    private var baseImage: NSImage?
 
     /// Called when user left-clicks the icon
     var onLeftClick: (() -> Void)?
@@ -28,6 +34,7 @@ final class StatusItemController: NSObject {
         let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Availability Click")?
             .withSymbolConfiguration(config)
         image?.isTemplate = true
+        baseImage = image
         button.image = image
 
         button.target = self
@@ -122,14 +129,23 @@ final class StatusItemController: NSObject {
         // Position underneath the menu bar icon
         positionWindowUnderStatusItem(window)
 
-        // Observe close to re-hide Dock icon
-        NotificationCenter.default.addObserver(
+        // Observe close to re-hide Dock icon. Keep the token and remove any
+        // previous one -- a discarded token leaks an observer per window.
+        if let observer = settingsCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        settingsCloseObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.settingsWindow = nil
+                guard let self else { return }
+                if let observer = self.settingsCloseObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                    self.settingsCloseObserver = nil
+                }
+                self.settingsWindow = nil
                 NSApp.setActivationPolicy(.accessory)
             }
         }
@@ -216,14 +232,12 @@ final class StatusItemController: NSObject {
             .withSymbolConfiguration(config)
         image?.isTemplate = true
 
-        let originalImage = statusItem.button?.image
-
         statusItem.button?.image = image
 
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.statusItem.button?.image = originalImage
+                self?.statusItem.button?.image = self?.baseImage
             }
         }
     }

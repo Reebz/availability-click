@@ -1,0 +1,22 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Run tests
+        run: |
+          xcodebuild test \
+            -project AvailabilityClick.xcodeproj \
+            -scheme AvailabilityClick \
+            -destination 'platform=macOS'

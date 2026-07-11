@@ -49,12 +49,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Keyboard Shortcut
 
+    /// Last shortcut state handed to applyShortcut. The defaults observer
+    /// fires for every settings write, so this is what keeps unrelated
+    /// changes from churning (or killing) the registered monitor.
+    private var lastAppliedShortcut: [String: Int]?
+
     private func registerSavedShortcut() {
-        guard let saved = AppSettings.globalShortcut,
+        applyShortcut(AppSettings.globalShortcut)
+    }
+
+    /// Shortcut state encoding: nil or empty dict = never customized (use the
+    /// default Ctrl+Shift+C); keyCode 0 + modifiers 0 = explicitly cleared by
+    /// the user (stay unregistered); anything else = the recorded shortcut.
+    private func applyShortcut(_ saved: [String: Int]?) {
+        lastAppliedShortcut = saved
+
+        guard let saved,
               let keyCode = saved["keyCode"],
-              let modifiers = saved["modifiers"],
-              keyCode != 0 || modifiers != 0 else {
-            // No saved shortcut -- register default: Ctrl+Shift+C
+              let modifiers = saved["modifiers"] else {
+            // Never customized -- register default: Ctrl+Shift+C
             shortcutManager.register(
                 keyCode: 8,
                 modifiers: [.control, .shift]
@@ -64,9 +77,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if keyCode == 0 && modifiers == 0 {
+            shortcutManager.unregister()
+            return
+        }
+
         shortcutManager.register(
-            keyCode: UInt16(keyCode),
-            modifiers: NSEvent.ModifierFlags(rawValue: UInt(modifiers))
+            keyCode: UInt16(clamping: keyCode),
+            modifiers: NSEvent.ModifierFlags(rawValue: UInt(bitPattern: modifiers))
         ) { [weak self] in
             self?.copyDefault()
         }
@@ -85,29 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleShortcutChange() {
-        guard let saved = AppSettings.globalShortcut else {
-            shortcutManager.unregister()
-            return
-        }
-
-        guard let keyCode = saved["keyCode"],
-              let modifiers = saved["modifiers"] else {
-            shortcutManager.unregister()
-            return
-        }
-
-        // Empty dict means shortcut was cleared
-        if keyCode == 0 && modifiers == 0 {
-            shortcutManager.unregister()
-            return
-        }
-
-        shortcutManager.register(
-            keyCode: UInt16(keyCode),
-            modifiers: NSEvent.ModifierFlags(rawValue: UInt(modifiers))
-        ) { [weak self] in
-            self?.copyDefault()
-        }
+        // Fires on every UserDefaults write; only re-apply on real changes.
+        let saved = AppSettings.globalShortcut
+        guard saved != lastAppliedShortcut else { return }
+        applyShortcut(saved)
     }
 
     // MARK: - Preview
@@ -118,12 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let rangeType: DateRangeType
-        if AppSettings.defaultRangeMode == "thisWeek" {
-            rangeType = .thisWeek
-        } else {
-            rangeType = .businessDays(AppSettings.defaultBusinessDays)
-        }
+        let rangeType = defaultRangeType
 
         Task { @MainActor in
             let dateRange = calculateDateRange(for: rangeType)
@@ -144,14 +138,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Copy Pipeline
 
-    private func copyDefault() {
-        let rangeType: DateRangeType
+    private var defaultRangeType: DateRangeType {
         if AppSettings.defaultRangeMode == "thisWeek" {
-            rangeType = .thisWeek
-        } else {
-            rangeType = .businessDays(AppSettings.defaultBusinessDays)
+            return .thisWeek
         }
-        copyRange(rangeType)
+        return .businessDays(AppSettings.defaultBusinessDays)
+    }
+
+    private func copyDefault() {
+        copyRange(defaultRangeType)
     }
 
     private func copyRange(_ rangeType: DateRangeType) {
@@ -179,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if slots.isEmpty {
                 statusItemController.flashConfirmation(success: false)
             } else {
-                let template: FormatTemplate = AppSettings.defaultFormat == "markdown" ? .markdown : .plainText
+                let template = AppSettings.defaultFormatTemplate
                 let text = formatter.format(
                     slots: slots,
                     showTimeZone: AppSettings.showTimeZone,
@@ -201,33 +196,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = Date()
         let today = cal.startOfDay(for: now)
 
-        switch rangeType {
-        case .thisWeek, .businessDays:
-            let start = today
-            let end = cal.date(byAdding: .day, value: 7, to: today)!
-            return (start, end)
+        // Derive the fetch window from the same day list the availability math
+        // will report on. A fixed window can undershoot it (an evening click or
+        // sparse working days push the Nth business day past today+7) and a day
+        // with no fetched events reads as fully free.
+        let days = availabilityService.businessDaysForRange(
+            rangeType,
+            from: now,
+            workingDays: Set(AppSettings.workingDays)
+        )
 
-        case .nextWeek:
-            let weekday = cal.component(.weekday, from: today)
-            let daysUntilNextMonday = (9 - weekday) % 7
-            let offset = daysUntilNextMonday == 0 ? 7 : daysUntilNextMonday
-            let nextMonday = cal.date(byAdding: .day, value: offset, to: today)!
-            let end = cal.date(byAdding: .day, value: 7, to: nextMonday)!
-            return (nextMonday, end)
-
-        case .nextFortnight:
-            let weekday = cal.component(.weekday, from: today)
-            let daysUntilNextMonday = (9 - weekday) % 7
-            let offset = daysUntilNextMonday == 0 ? 7 : daysUntilNextMonday
-            let nextMonday = cal.date(byAdding: .day, value: offset, to: today)!
-            let end = cal.date(byAdding: .day, value: 14, to: nextMonday)!
-            return (nextMonday, end)
-
-        case .next30Days:
-            let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
-            let end = cal.date(byAdding: .day, value: 30, to: tomorrow)!
-            return (tomorrow, end)
+        guard let first = days.first, let last = days.last,
+              let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: last)) else {
+            let fallbackEnd = cal.date(byAdding: .day, value: 7, to: today) ?? today
+            return (today, fallbackEnd)
         }
+
+        return (min(today, cal.startOfDay(for: first)), end)
     }
 
     // MARK: - Permission
@@ -235,6 +220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasShownPermissionAlert = false
 
     private func showPermissionAlert() {
+        // Always give visible click feedback, even after the one-shot alert
+        // has fired -- otherwise unauthorized clicks are silent no-ops.
+        statusItemController.flashConfirmation(success: false)
+
         guard !hasShownPermissionAlert else { return }
         hasShownPermissionAlert = true
 

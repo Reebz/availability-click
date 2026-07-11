@@ -17,6 +17,32 @@ private func slot(_ day: Int, _ startHour: Int, _ startMin: Int, _ endHour: Int,
     )
 }
 
+/// Pins AppSettings-backed defaults to known values for the duration of
+/// `body`, then restores whatever was there before. TEST_HOST is the real
+/// app bundle, so UserDefaults.standard is the developer's live settings --
+/// tests that read AppSettings must not depend on (or clobber) them.
+private func withPinnedSettings(_ overrides: [String: Int], run body: () -> Void) {
+    let defaults = UserDefaults.standard
+    let originals = overrides.keys.map { ($0, defaults.object(forKey: $0)) }
+    for (key, value) in overrides { defaults.set(value, forKey: key) }
+    body()
+    for (key, original) in originals {
+        if let original {
+            defaults.set(original, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+}
+
+private let stockWorkingSettings: [String: Int] = [
+    AppSettings.workingHoursStartKey: 540,   // 9:00 AM
+    AppSettings.workingHoursEndKey: 1020,    // 5:00 PM
+    AppSettings.todayBufferMinutesKey: 60,
+    AppSettings.minimumSlotMinutesKey: 30,
+    AppSettings.roundingGranularityKey: 30,
+]
+
 // ============================================================================
 // MARK: - TimeSlot Tests
 // ============================================================================
@@ -569,6 +595,124 @@ struct RangeTests {
         let mon = date(2026, 3, 23, 12)
         let days = service.businessDaysForRange(.thisWeek, from: mon, workingDays: emptyDays)
         #expect(days.isEmpty)
+    }
+
+    // MARK: - Termination Guards (businessDays mode)
+
+    // Regression: an empty working-days set used to spin nextNBusinessDays
+    // forever on the main actor (the Settings toggles allow unchecking all
+    // seven days).
+    @Test func businessDays_noWorkingDays_returnsEmpty() {
+        let mon = date(2026, 3, 23, 12)
+        let days = service.businessDaysForRange(.businessDays(5), from: mon, workingDays: [])
+        #expect(days.isEmpty)
+    }
+
+    @Test func businessDays_unknownWeekdayValues_returnsEmpty() {
+        let mon = date(2026, 3, 23, 12)
+        let days = service.businessDaysForRange(.businessDays(5), from: mon, workingDays: [8, 9])
+        #expect(days.isEmpty)
+    }
+
+    // MARK: - This Week: Evening Auto-Roll
+
+    // Regression: a Friday-evening click in this-week mode used to return an
+    // empty result (failure flash) instead of rolling to next week as the
+    // README promises. Relies on registered defaults (work end 5pm, buffer 1h).
+    @Test func thisWeek_fridayEvening_rollsToNextWeek() {
+        withPinnedSettings(stockWorkingSettings) {
+            let friEvening = date(2026, 3, 27, 18)
+            let days = service.businessDaysForRange(.thisWeek, from: friEvening, workingDays: monFri)
+            #expect(days.count == 5)
+            #expect(cal.component(.weekday, from: days[0]) == 2) // Monday
+            #expect(cal.component(.day, from: days[0]) == 30)
+        }
+    }
+
+    @Test func thisWeek_fridayNoon_stillIncludesFriday() {
+        withPinnedSettings(stockWorkingSettings) {
+            let friNoon = date(2026, 3, 27, 12)
+            let days = service.businessDaysForRange(.thisWeek, from: friNoon, workingDays: monFri)
+            #expect(days.count == 1)
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Availability Calculation Tests
+// ============================================================================
+
+@Suite("Availability Calculation")
+struct AvailabilityCalculationTests {
+    let service = AvailabilityService()
+
+    // End-to-end with no events: today is buffered, future days get the full
+    // working window. Relies on registered defaults (9-5, buffer 1h,
+    // rounding 30, minimum slot 30).
+    @Test func emptyEvents_todayIsBuffered() {
+        withPinnedSettings(stockWorkingSettings) {
+            let monNoon = date(2026, 3, 23, 12)
+            let result = service.calculateAvailability(events: [], rangeType: .businessDays(1), now: monNoon)
+            let today = cal.startOfDay(for: monNoon)
+            #expect(result.count == 1)
+            #expect(result[today]?.count == 1)
+            #expect(result[today]?.first?.start == date(2026, 3, 23, 13, 0))
+            #expect(result[today]?.first?.end == date(2026, 3, 23, 17, 0))
+        }
+    }
+
+    @Test func emptyEvents_futureDayGetsFullWindow() {
+        withPinnedSettings(stockWorkingSettings) {
+            let monNoon = date(2026, 3, 23, 12)
+            let result = service.calculateAvailability(events: [], rangeType: .businessDays(2), now: monNoon)
+            let tuesday = date(2026, 3, 24)
+            #expect(result[tuesday]?.first?.start == date(2026, 3, 24, 9, 0))
+            #expect(result[tuesday]?.first?.end == date(2026, 3, 24, 17, 0))
+        }
+    }
+
+    @Test func emptyEvents_emptyWorkingDays_returnsEmptyPromptly() {
+        let monNoon = date(2026, 3, 23, 12)
+        let days = service.businessDaysForRange(.businessDays(3), from: monNoon, workingDays: [])
+        #expect(days.isEmpty)
+    }
+}
+
+// ============================================================================
+// MARK: - Timezone Day-Label Tests
+// ============================================================================
+
+@Suite("Timezone Day Labels")
+struct TimezoneDayLabelTests {
+    let formatter = AvailabilityFormatter()
+
+    // Regression: recipient-timezone output used to convert times but keep
+    // sender-local day labels, pairing a converted evening time with the
+    // wrong weekday. Expected label computed dynamically so the test passes
+    // in any machine timezone.
+    @Test func dayLabelFollowsRecipientTimezone() throws {
+        let honolulu = try #require(TimeZone(identifier: "Pacific/Honolulu"))
+        let start = date(2026, 3, 25, 9, 0)
+        let end = date(2026, 3, 25, 10, 0)
+        let slots = [cal.startOfDay(for: start): [TimeSlot(start: start, end: end)]]
+
+        let output = formatter.format(slots: slots, timezone: honolulu)
+
+        let df = DateFormatter()
+        df.dateFormat = "EEE MMM d"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = honolulu
+        let expectedLabel = df.string(from: start)
+        #expect(output.hasPrefix(expectedLabel))
+    }
+
+    @Test func nilTimezone_keepsLocalDayLabel() {
+        let start = date(2026, 3, 25, 9, 0)
+        let end = date(2026, 3, 25, 10, 0)
+        let slots = [cal.startOfDay(for: start): [TimeSlot(start: start, end: end)]]
+
+        let output = formatter.format(slots: slots)
+        #expect(output == "Wed Mar 25: 9-10am")
     }
 }
 

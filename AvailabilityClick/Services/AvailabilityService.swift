@@ -10,7 +10,9 @@ enum DateRangeType {
 }
 
 struct AvailabilityService {
-    private let calendar = Calendar.current
+    // Computed so a system timezone change mid-run is picked up immediately
+    // (Calendar.current is a frozen snapshot, unlike autoupdatingCurrent).
+    private var calendar: Calendar { Calendar.current }
 
     // MARK: - Public API
 
@@ -29,7 +31,15 @@ struct AvailabilityService {
 
         let days = businessDaysForRange(rangeType, from: now, workingDays: workingDays)
         let filteredEvents = events.filter { shouldBlockTime($0) }
-        let eventsByDay = groupEventsByDay(filteredEvents)
+
+        // Clamp event slicing to the requested day range: fetched events only
+        // need to OVERLAP the window, so a far-future endDate would otherwise
+        // walk the slicing loop for years on the main actor.
+        let rangeStart = days.first.map { calendar.startOfDay(for: $0) } ?? calendar.startOfDay(for: now)
+        let rangeEnd = days.last.flatMap {
+            calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: $0))
+        } ?? rangeStart
+        let eventsByDay = groupEventsByDay(filteredEvents, clampedTo: rangeStart..<rangeEnd)
 
         var result: [Date: [TimeSlot]] = [:]
         let today = calendar.startOfDay(for: now)
@@ -132,6 +142,14 @@ struct AvailabilityService {
             guard let day = calendar.date(byAdding: .day, value: offset, to: monday) else { continue }
             let wd = calendar.component(.weekday, from: day)
             if workingDays.contains(wd) && day >= today {
+                // Skip today once the buffered "now" leaves no viable window
+                // (mirrors nextNBusinessDays) so the auto-roll below can fire
+                // on a Friday-evening click as the README promises.
+                if calendar.isDate(day, inSameDayAs: today) {
+                    let buffered = now.addingTimeInterval(TimeInterval(AppSettings.todayBufferMinutes * 60))
+                    let workEnd = dateFromMinutes(AppSettings.workingHoursEnd, on: day)
+                    if buffered >= workEnd { continue }
+                }
                 days.append(day)
             }
         }
@@ -145,12 +163,19 @@ struct AvailabilityService {
     }
 
     private func nextNBusinessDays(_ n: Int, from today: Date, workingDays: Set<Int>, now: Date) -> [Date] {
+        // An empty (or entirely invalid) working-days set would make the walk
+        // below spin forever on the main actor -- the Settings toggles allow
+        // unchecking all seven days.
+        guard !workingDays.isEmpty else { return [] }
+
         var days: [Date] = []
         var cursor = today
+        var iterations = 0
         let bufferMinutes = AppSettings.todayBufferMinutes
         let endMinutes = AppSettings.workingHoursEnd
 
-        while days.count < n {
+        while days.count < n && iterations < 366 {
+            iterations += 1
             let wd = calendar.component(.weekday, from: cursor)
             if workingDays.contains(wd) {
                 // Check if today still has viable time
@@ -288,8 +313,10 @@ struct AvailabilityService {
     private func isEffectivelyAllDay(_ event: EKEvent) -> Bool {
         let startMidnight = calendar.startOfDay(for: event.startDate) == event.startDate
         let endMidnight = calendar.startOfDay(for: event.endDate) == event.endDate
+        // Compare by day span, not fixed seconds: a DST spring-forward day is
+        // only 23 hours, and a midnight-to-midnight event on it is still all-day.
         return startMidnight && endMidnight
-            && event.endDate.timeIntervalSince(event.startDate) >= 86400
+            && (calendar.dateComponents([.day], from: event.startDate, to: event.endDate).day ?? 0) >= 1
     }
 
     func dateFromMinutes(_ minutes: Int, on day: Date) -> Date {
@@ -298,11 +325,11 @@ struct AvailabilityService {
         return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)!
     }
 
-    private func groupEventsByDay(_ events: [EKEvent]) -> [Date: [TimeSlot]] {
+    private func groupEventsByDay(_ events: [EKEvent], clampedTo range: Range<Date>) -> [Date: [TimeSlot]] {
         var grouped: [Date: [TimeSlot]] = [:]
 
         for event in events {
-            let slices = sliceEventIntoDays(event)
+            let slices = sliceEventIntoDays(event, clampedTo: range)
             for (day, start, end) in slices {
                 grouped[day, default: []].append(TimeSlot(start: start, end: end))
             }
@@ -311,11 +338,13 @@ struct AvailabilityService {
         return grouped
     }
 
-    private func sliceEventIntoDays(_ event: EKEvent) -> [(day: Date, start: Date, end: Date)] {
+    private func sliceEventIntoDays(_ event: EKEvent, clampedTo range: Range<Date>) -> [(day: Date, start: Date, end: Date)] {
         var slices: [(Date, Date, Date)] = []
-        var cursor = calendar.startOfDay(for: event.startDate)
+        // range.lowerBound is a startOfDay, so the cursor stays day-aligned.
+        var cursor = max(calendar.startOfDay(for: event.startDate), range.lowerBound)
+        let endLimit = min(event.endDate, range.upperBound)
 
-        while cursor < event.endDate {
+        while cursor < endLimit {
             guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
             let sliceStart = max(event.startDate, cursor)
             let sliceEnd = min(event.endDate, nextDay)

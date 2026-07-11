@@ -6,7 +6,9 @@ enum FormatTemplate {
 }
 
 struct AvailabilityFormatter {
-    private let calendar = Calendar.current
+    // Computed so a system timezone change mid-run is picked up immediately
+    // (Calendar.current is a frozen snapshot, unlike autoupdatingCurrent).
+    private var calendar: Calendar { Calendar.current }
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "EEE MMM d"
@@ -33,11 +35,25 @@ struct AvailabilityFormatter {
             effectiveCalendar = calendar
         }
 
-        let sortedDays = slots.keys.sorted()
+        // Day labels and grouping must follow the recipient timezone too, or a
+        // converted time gets paired with the sender-local day name (Sydney
+        // Tue 9am shown as "Tue ... 7pm" when it is Monday evening in New
+        // York). A slot lists under the recipient-local day of its START time
+        // -- slots spanning the recipient's midnight are not split.
+        var groupedSlots: [Date: [TimeSlot]] = [:]
+        for daySlots in slots.values {
+            for slot in daySlots {
+                let day = effectiveCalendar.startOfDay(for: slot.start)
+                groupedSlots[day, default: []].append(slot)
+            }
+        }
+        dateFormatter.timeZone = effectiveCalendar.timeZone
+
+        let sortedDays = groupedSlots.keys.sorted()
         var lines: [String] = []
 
         for day in sortedDays {
-            guard let daySlots = slots[day], !daySlots.isEmpty else { continue }
+            guard let daySlots = groupedSlots[day], !daySlots.isEmpty else { continue }
             let sortedSlots = daySlots.sorted { $0.start < $1.start }
             let dayLabel = dateFormatter.string(from: day)
             let timeParts = sortedSlots.map { formatTimeRange($0, using: effectiveCalendar) }
