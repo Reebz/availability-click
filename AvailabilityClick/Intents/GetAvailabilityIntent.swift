@@ -29,11 +29,14 @@ enum AvailabilityRange: String, AppEnum {
 
 enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
     case calendarAccessNotGranted
+    case noCalendarsAvailable
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .calendarAccessNotGranted:
-            "Availability Click doesn't have calendar access. Open the Availability Click app and grant access in System Settings > Privacy & Security > Calendars, then run this action again."
+            "Availability Click doesn't have calendar access. Open the Availability Click app and click its menu bar icon to trigger the permission prompt, then run this action again."
+        case .noCalendarsAvailable:
+            "No calendars are available on this Mac. Add a calendar account in System Settings, then run this action again."
         }
     }
 }
@@ -64,6 +67,12 @@ struct GetAvailabilityIntent: AppIntent {
         // permission prompt from here -- throw a descriptive error instead.
         guard CalendarService.shared.isAuthorized else {
             throw GetAvailabilityError.calendarAccessNotGranted
+        }
+
+        // Mirror the click pipeline's .noCalendars outcome: an empty store
+        // must error, not report a fully-free week computed from zero events.
+        guard !CalendarService.shared.selectedCalendars().isEmpty else {
+            throw GetAvailabilityError.noCalendarsAvailable
         }
 
         let rangeType = range.dateRangeType

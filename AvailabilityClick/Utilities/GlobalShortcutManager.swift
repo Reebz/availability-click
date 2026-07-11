@@ -63,8 +63,18 @@ final class GlobalShortcutManager {
     private(set) static var lastRegistrationFailed = false
 
     private var hotKeyRef: EventHotKeyRef?
-    private var eventHandlerRef: EventHandlerRef?
+    // nonisolated(unsafe) only so deinit (nonisolated) can remove it; every
+    // other access stays on the MainActor.
+    private nonisolated(unsafe) var eventHandlerRef: EventHandlerRef?
     private var action: (() -> Void)?
+
+    deinit {
+        // The handler's userData is an unretained self -- it must not
+        // outlive the manager (test-created managers are short-lived).
+        if let eventHandlerRef {
+            RemoveEventHandler(eventHandlerRef)
+        }
+    }
 
     /// Retained registration parameters so suspend/resume (recorder capture)
     /// can restore the hotkey even when the re-recorded combo is identical

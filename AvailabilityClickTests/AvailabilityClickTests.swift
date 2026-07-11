@@ -19,11 +19,20 @@ private func slot(_ day: Int, _ startHour: Int, _ startMin: Int, _ endHour: Int,
     )
 }
 
+/// Swift Testing runs suites in parallel, and every pinned key lives in the
+/// app's ONE real defaults domain -- unsynchronized pins from two suites
+/// would clobber each other (and could leak wrong values into the
+/// developer's live settings on restore).
+private let pinnedSettingsLock = NSLock()
+
 /// Pins AppSettings-backed defaults to known values for the duration of
 /// `body`, then restores whatever was there before. TEST_HOST is the real
 /// app bundle, so UserDefaults.standard is the developer's live settings --
 /// tests that read AppSettings must not depend on (or clobber) them.
 private func withPinnedSettings(_ overrides: [String: Any], run body: () -> Void) {
+    pinnedSettingsLock.lock()
+    defer { pinnedSettingsLock.unlock() }
+
     let defaults = UserDefaults.standard
     let originals = overrides.keys.map { ($0, defaults.object(forKey: $0)) }
     for (key, value) in overrides { defaults.set(value, forKey: key) }
@@ -1201,6 +1210,16 @@ struct LocaleFormattingTests {
         #expect(formatter.format(slots: slots) == "Wed Mar 25: 9:30-10:15, 14-15")
     }
 
+    @Test func dayPrecedesMonth_handlesBothMonthSymbols() {
+        #expect(!AvailabilityFormatter.dayPrecedesMonth(inTemplate: "MMM d"))
+        #expect(AvailabilityFormatter.dayPrecedesMonth(inTemplate: "d MMM"))
+        // Persian answers the MMMd skeleton with the standalone month
+        // symbol: "d LLL" is day-first and must be detected as such.
+        #expect(AvailabilityFormatter.dayPrecedesMonth(inTemplate: "d LLL"))
+        #expect(!AvailabilityFormatter.dayPrecedesMonth(inTemplate: "LLL d"))
+        #expect(!AvailabilityFormatter.dayPrecedesMonth(inTemplate: ""))
+    }
+
     @Test func dayFirstLocale_labelOrderLocalizes() {
         // en_AU orders day before month ("Wed 25 Mar") with English names,
         // so the assertion is deterministic across machines.
@@ -1424,6 +1443,26 @@ struct CalendarSelectionTests {
             togglingID: "home", isOn: true, current: ["work"], allIDs: allIDs
         )
         #expect(result == ["work", "home"])
+    }
+
+    // MARK: - Stale IDs vs the last-calendar guard (review finding)
+
+    @Test func staleIDAlongsideLastRealCalendar_uncheckStillBlocked() {
+        // {real, stale}: only "work" is visible, so unchecking it must be
+        // blocked -- the stale ID must not smuggle in a zero-checked state.
+        let result = CalendarPickerView.updatedSelection(
+            togglingID: "work", isOn: false, current: ["work", "deleted-cal"], allIDs: allIDs
+        )
+        #expect(result == nil)
+    }
+
+    @Test func allStaleStoredSet_behavesAsAllSelected() {
+        // All-stale resolves to "all calendars" on the read path; the write
+        // path must expand the same way, so one uncheck yields all-minus-one.
+        let result = CalendarPickerView.updatedSelection(
+            togglingID: "home", isOn: false, current: ["deleted-1", "deleted-2"], allIDs: allIDs
+        )
+        #expect(result == ["work", "shared"])
     }
 }
 

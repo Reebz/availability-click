@@ -42,6 +42,12 @@ struct ShortcutRecorderView: View {
         ) { _ in
             registrationFailed = GlobalShortcutManager.lastRegistrationFailed
         }
+        .onDisappear {
+            // Settings closed while (possibly) recording: resume() must fire
+            // or the suspended hotkey stays dead until relaunch. Idempotent
+            // when nothing is suspended.
+            NotificationCenter.default.post(name: .shortcutRecordingEnded, object: nil)
+        }
     }
 
     private func loadSavedShortcut() {
@@ -197,5 +203,16 @@ private final class ShortcutNSView: NSView {
             needsDisplay = true
         }
         return super.resignFirstResponder()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Window closed mid-recording: resignFirstResponder is not
+        // guaranteed to fire, and a missed recordingEnded leaves the global
+        // hotkey suspended until relaunch.
+        if window == nil && isRecording {
+            isRecording = false
+            onRecordingChanged?(false)
+        }
     }
 }

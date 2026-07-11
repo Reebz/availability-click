@@ -252,6 +252,7 @@ final class StatusItemController: NSObject {
 
     private var coachPopover: NSPopover?
     private var coachDismissMonitor: Any?
+    private var coachDismissLocalMonitor: Any?
 
     func showCoachmark() {
         guard coachPopover == nil, let button = statusItem.button else { return }
@@ -264,8 +265,10 @@ final class StatusItemController: NSObject {
         coachPopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
-        // Any click elsewhere also dismisses. Mouse global monitors need no
-        // Accessibility grant (unlike key monitors).
+        // Any click elsewhere also dismisses. The global monitor covers other
+        // apps (mouse monitors need no Accessibility grant, unlike key
+        // monitors); the local monitor covers clicks inside this app --
+        // including on the coach popover itself.
         coachDismissMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
@@ -273,12 +276,24 @@ final class StatusItemController: NSObject {
                 self?.dismissCoachmark()
             }
         }
+        coachDismissLocalMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.dismissCoachmark()
+            }
+            return event
+        }
     }
 
     private func dismissCoachmark() {
         if let monitor = coachDismissMonitor {
             NSEvent.removeMonitor(monitor)
             coachDismissMonitor = nil
+        }
+        if let monitor = coachDismissLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            coachDismissLocalMonitor = nil
         }
         coachPopover?.close()
         coachPopover = nil

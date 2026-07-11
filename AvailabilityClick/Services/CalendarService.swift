@@ -49,8 +49,9 @@ final class CalendarService {
 
     /// Selection resolution (KTD2), extracted pure so it is unit-testable:
     /// `[]` means "never customized = all calendars"; a saved set whose IDs
-    /// are all stale also falls back to all calendars.
-    static func effectiveSelectedIDs(saved: [String], allIDs: [String]) -> Set<String> {
+    /// are all stale also falls back to all calendars. Nonisolated: pure
+    /// function, also called from the picker's binding getter.
+    nonisolated static func effectiveSelectedIDs(saved: [String], allIDs: [String]) -> Set<String> {
         let savedSet = Set(saved)
         if savedSet.isEmpty { return Set(allIDs) }
 

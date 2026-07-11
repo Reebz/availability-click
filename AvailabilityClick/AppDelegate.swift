@@ -202,14 +202,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.shortcutManager.resume() }
         })
+        // A refused registration must not leave the dedupe guard holding the
+        // failed combo: re-recording the identical combo is a retry, and the
+        // guard would otherwise swallow it into a silent no-op (OQ5).
+        recordingObservers.append(center.addObserver(
+            forName: .shortcutRegistrationStateChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard GlobalShortcutManager.lastRegistrationFailed else { return }
+                self?.lastAppliedShortcut = nil
+            }
+        })
     }
 
     // MARK: - Preview
 
     private func showPreview() {
         guard calendarService.isAuthorized else {
-            statusItemController.showOutcome(.noAccess)
-            maybeShowPermissionAlert()
+            handleUnauthorizedInteraction()
             return
         }
 
@@ -267,8 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func copyRange(_ rangeType: DateRangeType) {
         // Authorization before debounce (OQ4) -- see copyDecision above.
         guard calendarService.isAuthorized else {
-            statusItemController.showOutcome(.noAccess)
-            maybeShowPermissionAlert()
+            handleUnauthorizedInteraction()
             return
         }
 
@@ -308,6 +317,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Permission
 
     private var hasShownPermissionAlert = false
+
+    /// An unauthorized click or hotkey press. When the status is still
+    /// .notDetermined the system prompt was never requested this session --
+    /// a headless intent-first launch suppresses the launch-time request
+    /// (OQ10) and the app then never appears in Privacy & Security >
+    /// Calendars, making the alert's instructions unfollowable. A click IS a
+    /// user-visible moment, so fire the real request now; the coach follows
+    /// its resolution (KTD8).
+    private func handleUnauthorizedInteraction() {
+        statusItemController.showOutcome(.noAccess)
+
+        if calendarService.authorizationStatus == .notDetermined {
+            // The click makes this session user-visible again, so the
+            // intent-launch suppression no longer applies (to the coach
+            // either).
+            Self.intentDidRunThisLaunch = false
+            Task { @MainActor in
+                _ = await calendarService.requestAccess()
+                showCoachmarkIfNeeded()
+            }
+        } else {
+            maybeShowPermissionAlert()
+        }
+    }
 
     /// One-shot per launch; the caller has already flashed `.noAccess`, so
     /// repeat unauthorized clicks still get visible feedback without

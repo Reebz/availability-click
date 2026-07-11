@@ -63,9 +63,12 @@ struct CalendarPickerView: View {
         }
     }
 
-    /// Pure toggle logic (KTD2): a never-customized `[]` expands to the full
-    /// ID set on first touch, explicit IDs persist from then on (no collapse
-    /// back to `[]`), and unchecking the last selected calendar is blocked.
+    /// Pure toggle logic (KTD2): a never-customized `[]` (or an all-stale
+    /// set, which resolves to "all" on the read path) expands to the full ID
+    /// set on first touch, explicit IDs persist from then on (no collapse
+    /// back to `[]`), and unchecking the last VISIBLE calendar is blocked --
+    /// the guard compares against present IDs so stale ones (deleted or
+    /// offline accounts) can't smuggle the picker into a zero-checked state.
     /// Returns nil when the change is blocked.
     static func updatedSelection(
         togglingID id: String,
@@ -73,11 +76,12 @@ struct CalendarPickerView: View {
         current: Set<String>,
         allIDs: [String]
     ) -> Set<String>? {
-        var selection = current.isEmpty ? Set(allIDs) : current
+        let allSet = Set(allIDs)
+        var selection = current.intersection(allSet).isEmpty ? allSet : current
         if isOn {
             selection.insert(id)
         } else {
-            guard selection != [id] else { return nil }
+            guard selection.intersection(allSet) != [id] else { return nil }
             selection.remove(id)
         }
         return selection
@@ -86,7 +90,13 @@ struct CalendarPickerView: View {
     private func binding(for id: String) -> Binding<Bool> {
         Binding(
             get: {
-                selectedIDs.isEmpty || selectedIDs.contains(id)
+                // Mirror the read path exactly: an all-stale stored set
+                // resolves to "all calendars", so the checkboxes must show
+                // all checked -- not zero checked while copies use all.
+                CalendarService.effectiveSelectedIDs(
+                    saved: Array(selectedIDs),
+                    allIDs: calendars.map(\.calendarIdentifier)
+                ).contains(id)
             },
             set: { isOn in
                 guard let updated = Self.updatedSelection(
@@ -105,10 +115,10 @@ struct CalendarPickerView: View {
     }
 
     private func isLastSelected(_ id: String) -> Bool {
-        let effective = selectedIDs.isEmpty
-            ? Set(calendars.map(\.calendarIdentifier))
-            : selectedIDs
-        return effective == [id]
+        CalendarService.effectiveSelectedIDs(
+            saved: Array(selectedIDs),
+            allIDs: calendars.map(\.calendarIdentifier)
+        ) == [id]
     }
 
     /// Transient caption (OQ14): appears on the blocked attempt, fades after

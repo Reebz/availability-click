@@ -144,16 +144,20 @@ struct AvailabilityFormatter {
         let template = DateFormatter.dateFormat(
             fromTemplate: "MMMd", options: 0, locale: locale
         ) ?? "MMM d"
-        let dayFirst: Bool
-        if let dayIndex = template.firstIndex(of: "d"),
-           let monthIndex = template.firstIndex(of: "M") {
-            dayFirst = dayIndex < monthIndex
-        } else {
-            dayFirst = false
-        }
-        f.dateFormat = dayFirst ? "EEE d MMM" : "EEE MMM d"
+        f.dateFormat = Self.dayPrecedesMonth(inTemplate: template) ? "EEE d MMM" : "EEE MMM d"
         f.timeZone = timeZone
         return f
+    }
+
+    /// Internal for tests. Some locales answer the "MMMd" skeleton with the
+    /// standalone month symbol "L" (e.g. Persian: "d LLL"), so probing only
+    /// for "M" would misread a day-first locale as month-first.
+    static func dayPrecedesMonth(inTemplate template: String) -> Bool {
+        guard let dayIndex = template.firstIndex(of: "d"),
+              let monthIndex = template.firstIndex(where: { $0 == "M" || $0 == "L" }) else {
+            return false
+        }
+        return dayIndex < monthIndex
     }
 
     // MARK: - Time Range Formatting
