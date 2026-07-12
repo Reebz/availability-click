@@ -53,12 +53,7 @@ struct AvailabilityFormatter {
             }
         }
 
-        if showTimeZone {
-            lines.append("(\(Self.timezoneString(for: timezone)))")
-        }
-        if let asOf {
-            lines.append(asOfLine(asOf, timezone: timezone))
-        }
+        appendTrailingLines(to: &lines, showTimeZone: showTimeZone, timezone: timezone, asOf: asOf)
 
         return lines.joined(separator: "\n")
     }
@@ -135,6 +130,24 @@ struct AvailabilityFormatter {
         return "(as of \(stamp))"
     }
 
+    /// Appends the optional timezone label and as-of stamp — the trailing lines
+    /// shared by the grid (`format`) and proposal (`formatProposal`) string
+    /// renderers — so their composition can't drift. The attributed renderer
+    /// builds the same two lines in NSAttributedString form.
+    private func appendTrailingLines(
+        to lines: inout [String],
+        showTimeZone: Bool,
+        timezone: TimeZone?,
+        asOf: Date?
+    ) {
+        if showTimeZone {
+            lines.append("(\(Self.timezoneString(for: timezone)))")
+        }
+        if let asOf {
+            lines.append(asOfLine(asOf, timezone: timezone))
+        }
+    }
+
     // MARK: - Proposal Sentence (U4)
 
     /// Renders the pre-selected proposal slots as one numbered sentence (R1/R2)
@@ -167,12 +180,7 @@ struct AvailabilityFormatter {
             lines.append("Here are a few times that could work — reply with a number: \(items.joined(separator: "; ")).")
         }
 
-        if showTimeZone {
-            lines.append("(\(Self.timezoneString(for: timezone)))")
-        }
-        if let asOf {
-            lines.append(asOfLine(asOf, timezone: timezone))
-        }
+        appendTrailingLines(to: &lines, showTimeZone: showTimeZone, timezone: timezone, asOf: asOf)
 
         return lines.joined(separator: "\n")
     }

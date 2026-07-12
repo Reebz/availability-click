@@ -159,18 +159,32 @@ struct PreviewPopoverView: View {
         return "\(name) (\(AvailabilityFormatter.timezoneString(for: tz)))"
     }
 
-    private var filteredTimezones: [TimeZone] {
-        let all = TimeZone.knownTimeZoneIdentifiers
+    /// Every known zone, sorted by GMT offset, each with its three search fields
+    /// pre-lowercased — built once, not rebuilt on each `body` evaluation (a
+    /// format-picker tap or a row selection re-renders the popover). Precomputing
+    /// the fields keeps a keystroke from calling the locale-aware `localizedName`
+    /// on ~450 zones. The GMT offset and the DST-dependent abbreviation are
+    /// sampled at first access, so a DST shift mid-session is a cosmetic ordering
+    /// and abbreviation-search difference.
+    private static let searchableTimezones: [(zone: TimeZone, id: String, abbr: String, name: String)] =
+        TimeZone.knownTimeZoneIdentifiers
             .compactMap { TimeZone(identifier: $0) }
             .sorted { $0.secondsFromGMT() < $1.secondsFromGMT() }
+            .map { tz in
+                (
+                    tz,
+                    tz.identifier.lowercased(),
+                    (tz.abbreviation() ?? "").lowercased(),
+                    (tz.localizedName(for: .standard, locale: .current) ?? "").lowercased()
+                )
+            }
 
-        if searchText.isEmpty { return Array(all.prefix(20)) }
+    private var filteredTimezones: [TimeZone] {
+        if searchText.isEmpty { return Array(Self.searchableTimezones.prefix(20).map(\.zone)) }
 
         let query = searchText.lowercased()
-        return all.filter { tz in
-            tz.identifier.lowercased().contains(query)
-                || (tz.abbreviation() ?? "").lowercased().contains(query)
-                || (tz.localizedName(for: .standard, locale: .current) ?? "").lowercased().contains(query)
-        }
+        return Self.searchableTimezones
+            .filter { $0.id.contains(query) || $0.abbr.contains(query) || $0.name.contains(query) }
+            .map(\.zone)
     }
 }

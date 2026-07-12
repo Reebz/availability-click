@@ -2687,6 +2687,29 @@ struct StaleWatchGuardTests {
         #expect(!AppDelegate.copiedSlotsBecameStale(watched: s, fresh: s))
     }
 
+    // MARK: - Slot-settings signature (R5 false-badge guard)
+
+    @Test func settingsSignature_stableWhenSettingsUnchanged() async {
+        var a: SlotSettingsSignature?
+        var b: SlotSettingsSignature?
+        await withPinnedSettings(stockWorkingSettings) { a = .current }
+        await withPinnedSettings(stockWorkingSettings) { b = .current }
+        #expect(a == b)
+    }
+
+    @Test func settingsSignature_changesWhenSlotShapingSettingChanges() async {
+        // Changing a slot-shaping setting (here Slot Rounding) after a copy must
+        // change the signature, so the stale-copy recheck skips rather than
+        // false-badging unbooked slots as "no longer free" (adversarial P3).
+        var base: SlotSettingsSignature?
+        var changed: SlotSettingsSignature?
+        var altered = stockWorkingSettings
+        altered[AppSettings.roundingGranularityKey] = 15   // stock is 30
+        await withPinnedSettings(stockWorkingSettings) { base = .current }
+        await withPinnedSettings(altered) { changed = .current }
+        #expect(base != changed)
+    }
+
     // MARK: - Trailing debounce coalescing (KTD11)
 
     @Test func debouncer_onlyNewestGenerationIsCurrent() {

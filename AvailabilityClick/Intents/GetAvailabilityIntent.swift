@@ -52,6 +52,43 @@ enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
     }
 }
 
+/// Shared pipeline for both Shortcuts intents. Marks the headless launch,
+/// enforces the auth and no-calendars guards, then runs the same computation
+/// the click path uses and returns the post-pipeline slot dictionary — each
+/// intent shapes its own result (formatted text vs structured entities). One
+/// place so the two intents' guards and pipeline can never drift.
+@MainActor
+func resolveAvailabilitySlots(range: AvailabilityRange, businessDays: Int?) async throws -> [Date: [TimeSlot]] {
+    // A cold Shortcuts run launches the app headless; mark the launch so its
+    // user-visible side effects (TCC auto-request, first-run coach) stay
+    // quiet (OQ10).
+    AppDelegate.intentDidRunThisLaunch = true
+
+    // Shortcuts runs are frequently unattended: never trigger the system
+    // permission prompt from here -- throw a descriptive error instead.
+    guard CalendarService.shared.isAuthorized else {
+        throw GetAvailabilityError.calendarAccessNotGranted
+    }
+    // An empty selection (empty store, or an all-stale selection under R11)
+    // throws, never a silent all-calendars read.
+    guard !CalendarService.shared.selectedCalendars().isEmpty else {
+        throw GetAvailabilityError.noCalendarsAvailable
+    }
+
+    let rangeType = AvailabilityRange.dateRangeType(for: range, businessDays: businessDays)
+    let service = AvailabilityService()
+    // Capture `now` once and pass it to BOTH the window derivation and the slot
+    // math (the click path already does this). Otherwise each defaults to its
+    // own `Date()` with the EventKit fetch between them; a clock crossing
+    // midnight or the today-buffer cutoff mid-fetch shifts calculateAvailability's
+    // day list off the fetched window, and the trailing day — having no fetched
+    // events — reads as falsely fully free.
+    let now = Date()
+    let window = service.fetchWindow(for: rangeType, now: now)
+    let events = await CalendarService.shared.fetchEvents(from: window.start, to: window.end)
+    return service.calculateAvailability(events: events, rangeType: rangeType, now: now)
+}
+
 /// Read-only, interactive-safe (KTD6): returns the formatted availability
 /// string without opening UI, flashing the icon, touching the clipboard, or
 /// triggering the system permission prompt.
@@ -78,28 +115,7 @@ struct GetAvailabilityIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        // A cold Shortcuts run launches the app headless; mark the launch so
-        // its user-visible side effects (TCC auto-request, first-run coach)
-        // stay quiet (OQ10).
-        AppDelegate.intentDidRunThisLaunch = true
-
-        // Shortcuts runs are frequently unattended: never trigger the system
-        // permission prompt from here -- throw a descriptive error instead.
-        guard CalendarService.shared.isAuthorized else {
-            throw GetAvailabilityError.calendarAccessNotGranted
-        }
-
-        // Mirror the click pipeline's .noCalendars outcome: an empty store
-        // must error, not report a fully-free week computed from zero events.
-        guard !CalendarService.shared.selectedCalendars().isEmpty else {
-            throw GetAvailabilityError.noCalendarsAvailable
-        }
-
-        let rangeType = AvailabilityRange.dateRangeType(for: range, businessDays: businessDays)
-        let service = AvailabilityService()
-        let window = service.fetchWindow(for: rangeType)
-        let events = await CalendarService.shared.fetchEvents(from: window.start, to: window.end)
-        let slots = service.calculateAvailability(events: events, rangeType: rangeType)
+        let slots = try await resolveAvailabilitySlots(range: range, businessDays: businessDays)
 
         // Always the plain-text template: markdown syntax is unwanted
         // mid-automation (KTD6).

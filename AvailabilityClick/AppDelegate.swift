@@ -144,14 +144,44 @@ final class HoldGestureMachine {
     }
 }
 
+/// The slot-shaping settings `AvailabilityService.calculateAvailability` reads
+/// live. Captured at copy time so the stale-copy recheck (R5) recomputes under
+/// the SAME rules the copied slots were computed with — otherwise changing Slot
+/// Rounding, a buffer, or working hours after a copy shifts the recomputed
+/// boundaries and falsely badges unbooked slots as "no longer free."
+/// Internal (not private) so a test can pin it. Equatable is the whole point.
+struct SlotSettingsSignature: Equatable {
+    let workingDays: [Int]
+    let workingHoursStart: Int
+    let workingHoursEnd: Int
+    let todayBufferMinutes: Int
+    let eventBufferMinutes: Int
+    let minimumSlotMinutes: Int
+    let roundingGranularity: Int
+
+    static var current: SlotSettingsSignature {
+        SlotSettingsSignature(
+            workingDays: AppSettings.workingDays,
+            workingHoursStart: AppSettings.workingHoursStart,
+            workingHoursEnd: AppSettings.workingHoursEnd,
+            todayBufferMinutes: AppSettings.todayBufferMinutes,
+            eventBufferMinutes: AppSettings.eventBufferMinutes,
+            minimumSlotMinutes: AppSettings.minimumSlotMinutes,
+            roundingGranularity: AppSettings.roundingGranularity
+        )
+    }
+}
+
 /// What the app last copied, so a calendar change can be checked against it
 /// (R5 watch) and the next copy can detect a silent clobber (R6 guard). The
 /// original `now` is retained so the recompute lands on the SAME days, not a
-/// window re-derived from a later clock (KTD11).
+/// window re-derived from a later clock (KTD11); the settings signature keeps
+/// the recompute on the SAME slot-shaping rules.
 private struct CopyWatch {
     let slots: Set<TimeSlot>
     let rangeType: DateRangeType
     let now: Date
+    let settings: SlotSettingsSignature
 }
 
 @MainActor
@@ -353,7 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// replaces the watched set (R5). The pasteboard `changeCount` snapshot is
     /// taken inside PasteboardWriter by the write itself (KTD10).
     private func recordCopy(slots: Set<TimeSlot>, rangeType: DateRangeType, now: Date) {
-        copyWatch = CopyWatch(slots: slots, rangeType: rangeType, now: now)
+        copyWatch = CopyWatch(slots: slots, rangeType: rangeType, now: now, settings: .current)
         copyWatchGeneration += 1
         confirmationPending = false
         statusItemController.clearAttention(ifShowing: .copiedSlotStale)
@@ -379,6 +409,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let watch = copyWatch,
               calendarService.isAuthorized,
               !calendarService.selectedCalendars().isEmpty else { return }
+
+        // The recompute below reads slot-shaping settings live. If they changed
+        // since the copy, the copied snapshot and the recompute follow different
+        // rules and a "no longer free" comparison is meaningless — skip until the
+        // next copy re-snapshots under current settings. R5 is "a copied slot got
+        // booked," not "a setting changed."
+        guard SlotSettingsSignature.current == watch.settings else { return }
 
         let generation = copyWatchGeneration
         let window = availabilityService.fetchWindow(for: watch.rangeType, now: watch.now)
@@ -529,19 +566,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// timeout; an unauthorized/no-calendars hold shows the same outcome a copy
     /// would, never an empty popover.
     private func presentPreview(holdInitiated: Bool) {
-        guard calendarService.isAuthorized else {
-            handleUnauthorizedInteraction()
-            return
-        }
+        guard requireAuthorized() else { return }
 
         let rangeType = defaultRangeType
 
         Task { @MainActor in
-            refreshCalendarAttention()
-            guard !calendarService.selectedCalendars().isEmpty else {
-                statusItemController.showOutcome(.noCalendars)
-                return
-            }
+            guard ensureCalendarsAvailable() else { return }
 
             let now = Date()
             let dateRange = availabilityService.fetchWindow(for: rangeType, now: now)
@@ -572,10 +602,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copyRange(defaultRangeType)
     }
 
+    /// The shared authorization gate: flashes `.noAccess` and drives the
+    /// permission request/alert when calendar access isn't granted, returning
+    /// false. Every user-triggered entry point — the copy prologue and the
+    /// preview — goes through it so the unauthorized path can't drift.
+    private func requireAuthorized() -> Bool {
+        guard calendarService.isAuthorized else {
+            handleUnauthorizedInteraction()
+            return false
+        }
+        return true
+    }
+
+    /// Auth + debounce prologue shared by copyRange and copyProposal. Auth
+    /// precedes the debounce (OQ4) so failure feedback always fires; the
+    /// debounce only swallows authorized repeat clicks. Returns the copy's
+    /// `now`, or nil when the attempt was handled (unauthorized) or swallowed
+    /// (debounced) — the caller returns on nil.
+    private func beginCopyAttempt() -> Date? {
+        guard requireAuthorized() else { return nil }
+        let now = Date()
+        guard now.timeIntervalSince(lastCopyTime) > 0.5 else { return nil }
+        lastCopyTime = now
+        return now
+    }
+
+    /// Refreshes the calendars-unavailable badge and reports whether any
+    /// calendar is selected; flashes `.noCalendars` and returns false when none
+    /// is. Shared by the copy and preview flows.
+    private func ensureCalendarsAvailable() -> Bool {
+        refreshCalendarAttention()
+        guard !calendarService.selectedCalendars().isEmpty else {
+            statusItemController.showOutcome(.noCalendars)
+            return false
+        }
+        return true
+    }
+
     /// Gate ordering for the copy pipeline, extracted pure so it is
     /// unit-testable. Authorization precedes the debounce (OQ4): failure
     /// feedback always fires, the debounce only swallows authorized repeat
-    /// clicks (nil = ignore silently). Keep copyRange's guards in sync.
+    /// clicks (nil = ignore silently). This models the gate order now enforced
+    /// by `requireAuthorized()` + `beginCopyAttempt()` + `ensureCalendarsAvailable()`
+    /// — keep those helpers in sync with this order, not copyRange directly.
     static func copyDecision(
         isAuthorized: Bool,
         debouncePassed: Bool,
@@ -590,23 +659,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func copyRange(_ rangeType: DateRangeType) {
-        // Authorization before debounce (OQ4) -- see copyDecision above.
-        guard calendarService.isAuthorized else {
-            handleUnauthorizedInteraction()
-            return
-        }
-
-        // Debounce rapid clicks
-        let now = Date()
-        guard now.timeIntervalSince(lastCopyTime) > 0.5 else { return }
-        lastCopyTime = now
+        guard let now = beginCopyAttempt() else { return }
 
         Task { @MainActor in
-            refreshCalendarAttention()
-            guard !calendarService.selectedCalendars().isEmpty else {
-                statusItemController.showOutcome(.noCalendars)
-                return
-            }
+            guard ensureCalendarsAvailable() else { return }
 
             let dateRange = availabilityService.fetchWindow(for: rangeType, now: now)
             let events = await calendarService.fetchEvents(from: dateRange.start, to: dateRange.end)
@@ -661,21 +717,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// over the today-inclusive 30-day window. Same auth/debounce/no-calendars
     /// gates as copyRange; an empty proposal is the ordinary no-slots outcome.
     private func copyProposal() {
-        guard calendarService.isAuthorized else {
-            handleUnauthorizedInteraction()
-            return
-        }
-
-        let now = Date()
-        guard now.timeIntervalSince(lastCopyTime) > 0.5 else { return }
-        lastCopyTime = now
+        guard let now = beginCopyAttempt() else { return }
 
         Task { @MainActor in
-            refreshCalendarAttention()
-            guard !calendarService.selectedCalendars().isEmpty else {
-                statusItemController.showOutcome(.noCalendars)
-                return
-            }
+            guard ensureCalendarsAvailable() else { return }
 
             let rangeType: DateRangeType = .next30DaysIncludingToday
             let dateRange = availabilityService.fetchWindow(for: rangeType, now: now)

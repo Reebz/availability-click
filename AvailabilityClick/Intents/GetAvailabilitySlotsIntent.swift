@@ -69,24 +69,7 @@ struct GetAvailabilitySlotsIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<[AvailabilitySlot]> {
-        // Mark the launch so a cold headless run stays quiet (OQ10), mirroring
-        // the text intent.
-        AppDelegate.intentDidRunThisLaunch = true
-
-        guard CalendarService.shared.isAuthorized else {
-            throw GetAvailabilityError.calendarAccessNotGranted
-        }
-        // A stale-selection or empty store throws, never a silent all-calendars
-        // read (R11) -- selectedCalendars() is empty in that case.
-        guard !CalendarService.shared.selectedCalendars().isEmpty else {
-            throw GetAvailabilityError.noCalendarsAvailable
-        }
-
-        let rangeType = AvailabilityRange.dateRangeType(for: range, businessDays: businessDays)
-        let service = AvailabilityService()
-        let window = service.fetchWindow(for: rangeType)
-        let events = await CalendarService.shared.fetchEvents(from: window.start, to: window.end)
-        let slots = service.calculateAvailability(events: events, rangeType: rangeType)
+        let slots = try await resolveAvailabilitySlots(range: range, businessDays: businessDays)
 
         // Empty availability is a valid answer (a booked week), not an error;
         // throws are reserved for auth/no-calendars.

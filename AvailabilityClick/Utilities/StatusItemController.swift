@@ -34,10 +34,7 @@ final class StatusItemController: NSObject {
         guard let button = statusItem.button else { return }
 
         // ~20% larger than the default 16pt by using a point size config
-        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-        let image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "Availability Click")?
-            .withSymbolConfiguration(config)
-        image?.isTemplate = true
+        let image = Self.templateSymbolImage("calendar", accessibilityDescription: "Availability Click")
         baseImage = image
         button.image = image
 
@@ -354,12 +351,7 @@ final class StatusItemController: NSObject {
     /// flash reverts to the attention-aware baseline, not the raw base image,
     /// so a persistent badge survives an overlapping flash (KTD7).
     func showOutcome(_ outcome: CopyOutcome) {
-        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-        let image = NSImage(systemSymbolName: outcome.symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-        image?.isTemplate = true
-
-        statusItem?.button?.image = image
+        statusItem?.button?.image = Self.templateSymbolImage(outcome.symbolName)
         statusItem?.button?.toolTip = outcome.tooltip
 
         // User-triggered outcomes speak at high priority (R13). Posted once
@@ -388,8 +380,15 @@ final class StatusItemController: NSObject {
     /// returns nil and the caller falls back to `baseImage`.
     static func attentionSymbolImage(for state: AttentionState) -> NSImage? {
         guard let symbol = state.symbolName else { return nil }
+        return templateSymbolImage(symbol)
+    }
+
+    /// A 15pt medium template SF Symbol image — the single icon style used
+    /// across the menu bar (base icon, outcome flash, attention badge). Static
+    /// so both the instance paths and `attentionSymbolImage` share it.
+    private static func templateSymbolImage(_ name: String, accessibilityDescription: String? = nil) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibilityDescription)?
             .withSymbolConfiguration(config)
         image?.isTemplate = true
         return image

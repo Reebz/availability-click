@@ -19,7 +19,7 @@ private final class UncheckedSendableBox<T>: @unchecked Sendable {
 @MainActor
 final class CalendarService {
     static let shared = CalendarService()
-    let store = EKEventStore()
+    private let store = EKEventStore()
 
     private init() {
         AppSettings.registerDefaults()
