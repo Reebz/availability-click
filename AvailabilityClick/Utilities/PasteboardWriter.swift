@@ -52,19 +52,7 @@ enum PasteboardWriter {
                 timezone: timezone,
                 asOf: asOf
             )
-            let fullRange = NSRange(location: 0, length: attributed.length)
-            if let rtf = try? attributed.data(
-                from: fullRange,
-                documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
-            ) {
-                pasteboard.setData(rtf, forType: .rtf)
-            }
-            if let html = try? attributed.data(
-                from: fullRange,
-                documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
-            ) {
-                pasteboard.setData(html, forType: .html)
-            }
+            writeRichFlavors(attributed, to: pasteboard)
         }
 
         pasteboard.setString(plain, forType: .string)
@@ -86,20 +74,29 @@ enum PasteboardWriter {
             string: text,
             attributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]
         )
-        let fullRange = NSRange(location: 0, length: attributed.length)
-        if let rtf = try? attributed.data(
-            from: fullRange, documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
-        ) {
-            pasteboard.setData(rtf, forType: .rtf)
-        }
-        if let html = try? attributed.data(
-            from: fullRange, documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
-        ) {
-            pasteboard.setData(html, forType: .html)
-        }
+        writeRichFlavors(attributed, to: pasteboard)
 
         pasteboard.setString(text, forType: .string)
         lastWriteChangeCount = pasteboard.changeCount
         return true
+    }
+
+    /// Writes the .rtf and .html flavors derived from `attributed`. Best-effort:
+    /// a flavor whose serialization fails is skipped, never fatal. Callers own
+    /// clearContents(), the .string flavor, and the changeCount snapshot.
+    private static func writeRichFlavors(_ attributed: NSAttributedString, to pasteboard: NSPasteboard) {
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        if let rtf = try? attributed.data(
+            from: fullRange,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        ) {
+            pasteboard.setData(rtf, forType: .rtf)
+        }
+        if let html = try? attributed.data(
+            from: fullRange,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
+        ) {
+            pasteboard.setData(html, forType: .html)
+        }
     }
 }

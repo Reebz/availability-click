@@ -55,6 +55,9 @@ struct AvailabilityService {
         let bufferMinutes = AppSettings.todayBufferMinutes
         let eventBufferMinutes = AppSettings.eventBufferMinutes
         let minimumSlot = TimeInterval(AppSettings.minimumSlotMinutes * 60)
+        // Loop-invariant: read once, not per iterated day (matches the other
+        // settings hoisted above).
+        let granularity = AppSettings.roundingGranularity
 
         guard endMinutes > startMinutes else { return [:] }
 
@@ -94,7 +97,6 @@ struct AvailabilityService {
             )
 
             // Round slot boundaries to configured granularity
-            let granularity = AppSettings.roundingGranularity
             let roundedSlots: [TimeSlot]
             if granularity > 0 {
                 roundedSlots = freeSlots.compactMap { slot in
@@ -246,16 +248,23 @@ struct AvailabilityService {
         return days
     }
 
-    private func nextWeekDays(from today: Date, workingDays: Set<Int>) -> [Date] {
-        // Find next Monday
+    /// The Monday of the following week — shared by the next-week and fortnight
+    /// ranges. `(9 - weekday) % 7` maps any weekday to the offset of the coming
+    /// Monday; an exact 0 means today is Monday, so roll a full week forward.
+    private func nextMonday(from today: Date) -> Date? {
         let weekday = calendar.component(.weekday, from: today)
         let daysUntilNextMonday = (9 - weekday) % 7
         let offset = daysUntilNextMonday == 0 ? 7 : daysUntilNextMonday
-        guard let nextMonday = calendar.date(byAdding: .day, value: offset, to: today) else { return [] }
+        return calendar.date(byAdding: .day, value: offset, to: today)
+    }
 
+    /// `count` consecutive calendar days from `start` (inclusive), keeping only
+    /// those in `workingDays`. Shared by the fixed-window ranges; no today-buffer
+    /// logic (those ranges start in the future).
+    private func collectDays(from start: Date, count: Int, workingDays: Set<Int>) -> [Date] {
         var days: [Date] = []
-        for i in 0..<7 {
-            guard let day = calendar.date(byAdding: .day, value: i, to: nextMonday) else { continue }
+        for i in 0..<count {
+            guard let day = calendar.date(byAdding: .day, value: i, to: start) else { continue }
             let wd = calendar.component(.weekday, from: day)
             if workingDays.contains(wd) {
                 days.append(day)
@@ -264,36 +273,19 @@ struct AvailabilityService {
         return days
     }
 
-    private func fortnightDays(from today: Date, workingDays: Set<Int>) -> [Date] {
-        // 14 calendar days starting from next Monday
-        let weekday = calendar.component(.weekday, from: today)
-        let daysUntilNextMonday = (9 - weekday) % 7
-        let offset = daysUntilNextMonday == 0 ? 7 : daysUntilNextMonday
-        guard let nextMonday = calendar.date(byAdding: .day, value: offset, to: today) else { return [] }
+    private func nextWeekDays(from today: Date, workingDays: Set<Int>) -> [Date] {
+        guard let monday = nextMonday(from: today) else { return [] }
+        return collectDays(from: monday, count: 7, workingDays: workingDays)
+    }
 
-        var days: [Date] = []
-        for i in 0..<14 {
-            guard let day = calendar.date(byAdding: .day, value: i, to: nextMonday) else { continue }
-            let wd = calendar.component(.weekday, from: day)
-            if workingDays.contains(wd) {
-                days.append(day)
-            }
-        }
-        return days
+    private func fortnightDays(from today: Date, workingDays: Set<Int>) -> [Date] {
+        guard let monday = nextMonday(from: today) else { return [] }
+        return collectDays(from: monday, count: 14, workingDays: workingDays)
     }
 
     private func next30CalendarDays(from today: Date, workingDays: Set<Int>) -> [Date] {
         guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return [] }
-
-        var days: [Date] = []
-        for i in 0..<30 {
-            guard let day = calendar.date(byAdding: .day, value: i, to: tomorrow) else { continue }
-            let wd = calendar.component(.weekday, from: day)
-            if workingDays.contains(wd) {
-                days.append(day)
-            }
-        }
-        return days
+        return collectDays(from: tomorrow, count: 30, workingDays: workingDays)
     }
 
     /// Like `next30CalendarDays` but starting TODAY (U4 proposal window):
