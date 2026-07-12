@@ -155,7 +155,7 @@
 			path = Intents;
 			sourceTree = "<group>";
 		};
-		"TEMP_32DE843E-175A-4E3B-BD4C-D545AA8D210F" /* .claude */ = {
+		"TEMP_6B525DBB-9255-4ED2-9587-337BE20C32C0" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
