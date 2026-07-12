@@ -2,6 +2,10 @@
 
 All notable changes to Availability Click are documented here.
 
+## v1.2.1
+
+- The app icon now appears in the Cmd+Tab switcher and the Dock while the Settings window is open. Earlier builds bundled no icon, so it showed up blank there.
+
 ## v1.2.0
 
 The first update since launch, gathering everything built after v1.0.0.
