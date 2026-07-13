@@ -243,6 +243,16 @@
       box-shadow: var(--shadow-lg);
     }
 
+    /* Center a lone trailing card (e.g. the 5th of 5) instead of leaving it
+       orphaned in the left column of the 2-column grid. calc(50% - 10px) is
+       one column width (gap is 20px); reset on mobile where the grid is 1-col. */
+    .features-grid > .feature-card:last-child:nth-child(2n + 1) {
+      grid-column: 1 / -1;
+      max-width: calc(50% - 10px);
+      margin-left: auto;
+      margin-right: auto;
+    }
+
     .feature-icon {
       width: 40px;
       height: 40px;
@@ -487,6 +497,7 @@
       .demo-output { font-size: 0.78rem; padding: 16px 18px; }
       .features { padding: 40px 0; }
       .features-grid { grid-template-columns: 1fr; gap: 14px; }
+      .features-grid > .feature-card:last-child:nth-child(2n + 1) { max-width: none; }
       .feature-card { padding: 22px; }
       .how-it-works h2,
       .install h2 { font-size: 1.35rem; }
