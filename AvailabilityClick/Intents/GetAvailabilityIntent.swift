@@ -41,6 +41,9 @@ enum AvailabilityRange: String, AppEnum {
 enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
     case calendarAccessNotGranted
     case noCalendarsAvailable
+    /// Additive under KTD3: the timezone input named no zone the app accepts
+    /// (R17). Carries the trimmed text so the message can name it.
+    case unknownTimeZone(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -48,6 +51,8 @@ enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
             "Availability Click doesn't have calendar access. Open the Availability Click app and click its menu bar icon to trigger the permission prompt, then run this action again."
         case .noCalendarsAvailable:
             "No calendars are available on this Mac. Add a calendar account in System Settings, then run this action again."
+        case .unknownTimeZone(let value):
+            "Availability Click doesn't recognize the time zone \"\(value)\". Use a name such as Europe/Berlin or America/New_York, or leave the time zone empty to use this Mac's own."
         }
     }
 }

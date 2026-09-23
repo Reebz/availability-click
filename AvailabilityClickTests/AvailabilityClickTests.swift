@@ -2776,6 +2776,98 @@ struct ClockChangeLineTests {
 }
 
 // ============================================================================
+// MARK: - Time Zone Catalog & Resolver Tests (v1.3 U4, R15/R17)
+// ============================================================================
+
+@Suite("Time Zone Resolver")
+struct TimeZoneResolverTests {
+    /// The text the resolver's error names, or nil when it did not throw
+    /// that error.
+    private func rejectedValue(_ input: String) -> String? {
+        do {
+            _ = try TimeZoneCatalog.resolve(input)
+            return nil
+        } catch GetAvailabilityError.unknownTimeZone(let value) {
+            return value
+        } catch {
+            return nil
+        }
+    }
+
+    @Test func noValue_meansNoZone() throws {
+        #expect(try TimeZoneCatalog.resolve(nil) == nil)
+    }
+
+    @Test func emptyOrBlank_meansNoZone() throws {
+        // AE15
+        #expect(try TimeZoneCatalog.resolve("") == nil)
+        #expect(try TimeZoneCatalog.resolve("   ") == nil)
+        #expect(try TimeZoneCatalog.resolve(" \n\t ") == nil)
+    }
+
+    @Test func strayWhitespace_isTrimmed() throws {
+        #expect(try TimeZoneCatalog.resolve(" Europe/Berlin ")?.identifier == "Europe/Berlin")
+    }
+
+    @Test func identifier_matchesInAnyCase() throws {
+        #expect(try TimeZoneCatalog.resolve("europe/berlin")?.identifier == "Europe/Berlin")
+        #expect(try TimeZoneCatalog.resolve("EUROPE/BERLIN")?.identifier == "Europe/Berlin")
+    }
+
+    @Test func legacyAliases_resolve() throws {
+        let pacific = try #require(try TimeZoneCatalog.resolve("US/Pacific"))
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let january = utc.date(from: DateComponents(year: 2026, month: 1, day: 15))!
+        let july = utc.date(from: DateComponents(year: 2026, month: 7, day: 15))!
+        #expect(pacific.secondsFromGMT(for: january) == -8 * 3600)
+        #expect(pacific.secondsFromGMT(for: july) == -7 * 3600)
+
+        let plusTen = try #require(try TimeZoneCatalog.resolve("UTC+10"))
+        #expect(plusTen.secondsFromGMT(for: january) == 10 * 3600)
+        #expect(plusTen.secondsFromGMT(for: july) == 10 * 3600)
+        #expect(try TimeZoneCatalog.resolve("utc")?.secondsFromGMT() == 0)
+    }
+
+    @Test func bareAbbreviations_throwNamingTheValue() {
+        // The system resolves BST to Bangladesh and IST to India.
+        for abbreviation in ["BST", "IST", "EST"] {
+            #expect(rejectedValue(abbreviation) == abbreviation)
+        }
+    }
+
+    @Test func misspelledZone_throwsWithClearMessage() {
+        // AE11
+        #expect(rejectedValue("Europe/Berln") == "Europe/Berln")
+        #expect(rejectedValue("  Europe/Berln ") == "Europe/Berln")
+        let message = String(localized: GetAvailabilityError.unknownTimeZone("Europe/Berln").localizedStringResource)
+        #expect(message == "Availability Click doesn't recognize the time zone \"Europe/Berln\". Use a name such as Europe/Berlin or America/New_York, or leave the time zone empty to use this Mac's own.")
+        #expect(message.contains("Europe/Berln"))
+    }
+
+    @Test func previewSearch_unchangedByTheMove() {
+        // The v1.2.1 preview search, rebuilt here as the reference.
+        let query = "berlin"
+        let expected = TimeZone.knownTimeZoneIdentifiers
+            .compactMap { TimeZone(identifier: $0) }
+            .sorted { $0.secondsFromGMT() < $1.secondsFromGMT() }
+            .filter { tz in
+                tz.identifier.lowercased().contains(query)
+                    || (tz.abbreviation() ?? "").lowercased().contains(query)
+                    || (tz.localizedName(for: .standard, locale: .current) ?? "").lowercased().contains(query)
+            }
+            .map(\.identifier)
+        #expect(expected.contains("Europe/Berlin"))
+        #expect(TimeZoneCatalog.search(query).map(\.identifier) == expected)
+        #expect(TimeZoneCatalog.search("").count == 20)
+    }
+
+    @Test func shortcutsPickerList_isEveryKnownZoneInOrder() {
+        #expect(TimeZoneCatalog.identifiers == TimeZone.knownTimeZoneIdentifiers.sorted())
+    }
+}
+
+// ============================================================================
 // MARK: - As-Of Stamp Tests (U3/R4)
 // ============================================================================
 
