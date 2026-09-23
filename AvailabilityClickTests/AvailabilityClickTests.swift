@@ -948,6 +948,26 @@ struct AvailabilityCalculationTests {
             #expect(result[date(2026, 3, 26)]?.first?.start == date(2026, 3, 26, 9, 0))
         }
     }
+
+    @Test func tentativeSettingOn_leavesTentativeTimeFree() async {
+        // v1.3 U3: a Tentative 10-11 meeting next Monday.
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        pinned[AppSettings.eventBufferMinutesKey] = 0
+        let hold = StubEvent(eventStart: date(2026, 3, 23, 10), eventEnd: date(2026, 3, 23, 11), isTentativeAvailability: true)
+        let monday = date(2026, 3, 23)
+
+        pinned[AppSettings.treatTentativeAsFreeKey] = true
+        await withPinnedSettings(pinned) {
+            let result = service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12))
+            #expect(result[monday] == [TimeSlot(start: date(2026, 3, 23, 9), end: date(2026, 3, 23, 17))])
+        }
+        pinned[AppSettings.treatTentativeAsFreeKey] = false
+        await withPinnedSettings(pinned) {
+            let result = service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12))
+            #expect(result[monday]?.count == 2)
+        }
+    }
 }
 
 // ============================================================================
@@ -1175,6 +1195,8 @@ private struct StubEvent: BlockableEvent {
     var isDeclinedByCurrentUser = false
     var isOutOfOffice = false
     var isBusyOnAvailabilityCalendar = false
+    var isTentativeAvailability = false
+    var isTentativeByCurrentUser = false
 }
 
 @Suite("Event Filter Matrix")
@@ -1317,6 +1339,50 @@ struct EventFilterMatrixTests {
         let event = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true, isOutOfOffice: true)
         #expect(!service.shouldBlockTime(event))
     }
+
+    @Test func allDayShownAsTentative_blocksNothing() {
+        // AE7 / R9: with the setting off, an all-day Tentative event stays free.
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26), isTentativeAvailability: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    // MARK: Tentative setting (v1.3 U3, R10-R12)
+
+    @Test func tentativeSetting_freesMaybeReplyAndTentativeEvent() {
+        // AE8: one meeting has my Maybe reply but shows as Busy, the other
+        // shows as Tentative. On, neither blocks. Off, both block.
+        let (start, end) = busyHour()
+        let maybe = StubEvent(eventStart: start, eventEnd: end, isTentativeByCurrentUser: true)
+        let tentative = StubEvent(eventStart: start, eventEnd: end, isTentativeAvailability: true)
+        #expect(!service.shouldBlockTime(maybe, treatTentativeAsFree: true))
+        #expect(!service.shouldBlockTime(tentative, treatTentativeAsFree: true))
+        #expect(service.shouldBlockTime(maybe, treatTentativeAsFree: false))
+        #expect(service.shouldBlockTime(tentative, treatTentativeAsFree: false))
+        #expect(service.shouldBlockTime(maybe))
+        #expect(service.shouldBlockTime(tentative))
+    }
+
+    @Test func tentativeSetting_freesAllDayRecordedBusyWithMaybeReply() {
+        // AE14
+        let teamDay = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isBusyOnAvailabilityCalendar: true, isTentativeByCurrentUser: true
+        )
+        #expect(!service.shouldBlockTime(teamDay, treatTentativeAsFree: true))
+        #expect(service.shouldBlockTime(teamDay, treatTentativeAsFree: false))
+    }
+
+    @Test func tentativeSetting_canceledOrDeclined_stillBlockNothing() {
+        let (start, end) = busyHour()
+        let canceled = StubEvent(eventStart: start, eventEnd: end, isCanceled: true, isTentativeAvailability: true)
+        let declined = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true, isTentativeByCurrentUser: true)
+        for event in [canceled, declined] {
+            #expect(!service.shouldBlockTime(event, treatTentativeAsFree: true))
+            #expect(!service.shouldBlockTime(event, treatTentativeAsFree: false))
+        }
+    }
 }
 
 // ============================================================================
@@ -1382,6 +1448,15 @@ struct RealKeySettingsBoundsTests {
             await withPinnedSettings([AppSettings.eventBufferMinutesKey: valid]) {
                 #expect(AppSettings.eventBufferMinutes == valid)
             }
+        }
+    }
+
+    @Test func treatTentativeAsFree_unsetKey_readsFalse() async {
+        // R10: off unless the user turns it on.
+        await withPinnedSettings([AppSettings.treatTentativeAsFreeKey: true]) {
+            #expect(AppSettings.treatTentativeAsFree)
+            UserDefaults.standard.removeObject(forKey: AppSettings.treatTentativeAsFreeKey)
+            #expect(!AppSettings.treatTentativeAsFree)
         }
     }
 }
@@ -2976,6 +3051,47 @@ struct StaleWatchGuardTests {
         await withPinnedSettings(stockWorkingSettings) { base = .current }
         await withPinnedSettings(altered) { changed = .current }
         #expect(base != changed)
+    }
+
+    @Test func settingsSignature_followsTentativeSetting() async {
+        // AE9 / R13: flipping the setting after a copy changes the signature,
+        // so the recheck skips instead of raising a "no longer free" badge.
+        var off: [String: Any] = stockWorkingSettings
+        off[AppSettings.treatTentativeAsFreeKey] = false
+        var on = off
+        on[AppSettings.treatTentativeAsFreeKey] = true
+        var a: SlotSettingsSignature?
+        var b: SlotSettingsSignature?
+        var c: SlotSettingsSignature?
+        await withPinnedSettings(off) { a = .current }
+        await withPinnedSettings(off) { b = .current }
+        await withPinnedSettings(on) { c = .current }
+        #expect(a == b)
+        #expect(a != c)
+    }
+
+    @Test func overwriteGuard_seesTentativeSettingFlipAsChangedSlots() async {
+        // KTD6 parity: the guard compares slots, not settings, so copying the
+        // same range after the flip asks for confirmation like an hours change.
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        pinned[AppSettings.eventBufferMinutesKey] = 0
+        let hold = StubEvent(eventStart: date(2026, 3, 23, 10), eventEnd: date(2026, 3, 23, 11), isTentativeByCurrentUser: true)
+        let service = AvailabilityService()
+        var before: Set<TimeSlot> = []
+        var after: Set<TimeSlot> = []
+
+        pinned[AppSettings.treatTentativeAsFreeKey] = false
+        await withPinnedSettings(pinned) {
+            before = Set(service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12)).values.joined())
+        }
+        pinned[AppSettings.treatTentativeAsFreeKey] = true
+        await withPinnedSettings(pinned) {
+            after = Set(service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12)).values.joined())
+        }
+        #expect(AppDelegate.overwriteGuardSlotsDiffer(
+            watchedRange: .nextWeek, watchedSlots: before, range: .nextWeek, offered: after
+        ))
     }
 
     // MARK: - Trailing debounce coalescing (KTD11)

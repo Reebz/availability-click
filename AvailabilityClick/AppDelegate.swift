@@ -158,6 +158,7 @@ struct SlotSettingsSignature: Equatable {
     let eventBufferMinutes: Int
     let minimumSlotMinutes: Int
     let roundingGranularity: Int
+    let treatTentativeAsFree: Bool
 
     static var current: SlotSettingsSignature {
         SlotSettingsSignature(
@@ -167,7 +168,8 @@ struct SlotSettingsSignature: Equatable {
             todayBufferMinutes: AppSettings.todayBufferMinutes,
             eventBufferMinutes: AppSettings.eventBufferMinutes,
             minimumSlotMinutes: AppSettings.minimumSlotMinutes,
-            roundingGranularity: AppSettings.roundingGranularity
+            roundingGranularity: AppSettings.roundingGranularity,
+            treatTentativeAsFree: AppSettings.treatTentativeAsFree
         )
     }
 }

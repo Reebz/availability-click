@@ -24,6 +24,9 @@ enum AppSettings {
     static let eventBufferMinutesKey = "eventBufferMinutes"
     static let showAsOfStampKey = "showAsOfStamp"
 
+    // V1.3 keys
+    static let treatTentativeAsFreeKey = "treatTentativeAsFree"
+
     // Defaults
     static let defaultWorkingHoursStart = 540   // 9:00 AM
     static let defaultWorkingHoursEnd = 1020    // 5:00 PM
@@ -61,6 +64,7 @@ enum AppSettings {
             hasShownCoachmarkKey: false,
             eventBufferMinutesKey: defaultEventBuffer,
             showAsOfStampKey: false,
+            treatTentativeAsFreeKey: false,
         ])
     }
 
@@ -171,5 +175,14 @@ enum AppSettings {
     /// Off by default; a bool read needs no allowlist.
     static var showAsOfStamp: Bool {
         UserDefaults.standard.bool(forKey: showAsOfStampKey)
+    }
+
+    // MARK: - V1.3 Settings
+
+    /// Lets the user's Maybe replies and events shown as Tentative stop
+    /// blocking time (R10, R11). Off by default, which keeps blocking exactly
+    /// as it was (R12).
+    static var treatTentativeAsFree: Bool {
+        UserDefaults.standard.bool(forKey: treatTentativeAsFreeKey)
     }
 }

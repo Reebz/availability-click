@@ -25,6 +25,8 @@ protocol BlockableEvent {
     var isDeclinedByCurrentUser: Bool { get }
     var isOutOfOffice: Bool { get }
     var isBusyOnAvailabilityCalendar: Bool { get }
+    var isTentativeAvailability: Bool { get }
+    var isTentativeByCurrentUser: Bool { get }
 }
 
 extension EKEvent: BlockableEvent {
@@ -32,17 +34,23 @@ extension EKEvent: BlockableEvent {
     var eventEnd: Date { endDate }
     var isCanceled: Bool { status == .canceled }
     var isFreeAvailability: Bool { availability == .free }
-    var isDeclinedByCurrentUser: Bool {
-        guard let attendees, !attendees.isEmpty,
-              let me = attendees.first(where: { $0.isCurrentUser }) else { return false }
-        return me.participantStatus == .declined
-    }
+    var isDeclinedByCurrentUser: Bool { currentUserStatus == .declined }
     var isOutOfOffice: Bool { availability == .unavailable }
     /// Busy is the default availability value, so it only counts on a
     /// calendar that records availability (R8, KTD4). Calendars that do not
     /// record it report no supported availabilities.
     var isBusyOnAvailabilityCalendar: Bool {
         availability == .busy && !(calendar?.supportedEventAvailabilities.isEmpty ?? true)
+    }
+    var isTentativeAvailability: Bool { availability == .tentative }
+    var isTentativeByCurrentUser: Bool { currentUserStatus == .tentative }
+
+    /// The current user's reply, or nil when the event has no attendees or
+    /// none of them is flagged as the current user.
+    private var currentUserStatus: EKParticipantStatus? {
+        guard let attendees, !attendees.isEmpty,
+              let me = attendees.first(where: { $0.isCurrentUser }) else { return nil }
+        return me.participantStatus
     }
 }
 
@@ -67,11 +75,12 @@ struct AvailabilityService {
         // Loop-invariant: read once, not per iterated day (matches the other
         // settings hoisted above).
         let granularity = AppSettings.roundingGranularity
+        let treatTentativeAsFree = AppSettings.treatTentativeAsFree
 
         guard endMinutes > startMinutes else { return [:] }
 
         let days = businessDaysForRange(rangeType, from: now, workingDays: workingDays)
-        let filteredEvents = events.filter { shouldBlockTime($0) }
+        let filteredEvents = events.filter { shouldBlockTime($0, treatTentativeAsFree: treatTentativeAsFree) }
 
         // Clamp event slicing to the requested day range: fetched events only
         // need to OVERLAP the window, so a far-future endDate would otherwise
@@ -130,12 +139,15 @@ struct AvailabilityService {
     // MARK: - Event Filtering
 
     /// Check order is fixed (KTD5): canceled, shown as Free, and declined never
-    /// block. An all-day event then blocks only when it marks the sender away
-    /// (R7-R9). Every remaining timed event blocks.
-    func shouldBlockTime(_ event: some BlockableEvent) -> Bool {
+    /// block. With the tentative setting on, the user's Maybe reply or an
+    /// event shown as Tentative never blocks, all-day or timed (R11). An
+    /// all-day event then blocks only when it marks the sender away (R7-R9).
+    /// Every remaining timed event blocks.
+    func shouldBlockTime(_ event: some BlockableEvent, treatTentativeAsFree: Bool = false) -> Bool {
         if event.isCanceled { return false }
         if event.isFreeAvailability { return false }
         if event.isDeclinedByCurrentUser { return false }
+        if treatTentativeAsFree && (event.isTentativeByCurrentUser || event.isTentativeAvailability) { return false }
         if event.isAllDay || isEffectivelyAllDay(event) {
             return event.isOutOfOffice || event.isBusyOnAvailabilityCalendar
         }
