@@ -929,6 +929,25 @@ struct AvailabilityCalculationTests {
         let days = service.businessDaysForRange(.businessDays(3), from: monNoon, workingDays: [])
         #expect(days.isEmpty)
     }
+
+    @Test func allDayOutOfOffice_removesItsDays_bufferLeavesNextDayAlone() async {
+        // v1.3 U2: no blocking all-day event reached the per-day subtraction
+        // before. Out of Office Mon to Wed next week leaves Thu and Fri, and
+        // the event buffer does not push Thursday's first slot past 9am.
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        pinned[AppSettings.eventBufferMinutesKey] = 15
+        await withPinnedSettings(pinned) {
+            let away = StubEvent(
+                isAllDay: true, eventStart: date(2026, 3, 23), eventEnd: date(2026, 3, 26), isOutOfOffice: true
+            )
+            let result = service.calculateAvailability(
+                events: [away], rangeType: .nextWeek, now: date(2026, 3, 18, 12)
+            )
+            #expect(Set(result.keys) == [date(2026, 3, 26), date(2026, 3, 27)])
+            #expect(result[date(2026, 3, 26)]?.first?.start == date(2026, 3, 26, 9, 0))
+        }
+    }
 }
 
 // ============================================================================
@@ -1154,6 +1173,8 @@ private struct StubEvent: BlockableEvent {
     var isCanceled = false
     var isFreeAvailability = false
     var isDeclinedByCurrentUser = false
+    var isOutOfOffice = false
+    var isBusyOnAvailabilityCalendar = false
 }
 
 @Suite("Event Filter Matrix")
@@ -1221,6 +1242,79 @@ struct EventFilterMatrixTests {
     @Test func declinedByCurrentUser_blocksNothing() {
         let (start, end) = busyHour()
         let event = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true)
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    // MARK: All-day events that mark the sender away (v1.3 U2, R7-R9)
+
+    @Test func allDayCanceledOutOfOffice_blocksNothing() {
+        // AE13. Canceled comes before the all-day rule, so it never blocks.
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isCanceled: true, isOutOfOffice: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayDeclinedOutOfOffice_blocksNothing() {
+        // AE13
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isDeclinedByCurrentUser: true, isOutOfOffice: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayDeclinedRecordedBusy_blocksNothing() {
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isDeclinedByCurrentUser: true, isBusyOnAvailabilityCalendar: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayOutOfOffice_blocks() {
+        // AE5
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26), isOutOfOffice: true
+        )
+        #expect(service.shouldBlockTime(event))
+    }
+
+    @Test func midnightToMidnightOutOfOffice_blocks() {
+        let event = StubEvent(eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 28), isOutOfOffice: true)
+        #expect(service.isEffectivelyAllDay(event))
+        #expect(service.shouldBlockTime(event))
+    }
+
+    @Test func allDayBusy_blocksOnlyOnACalendarThatRecordsAvailability() {
+        // AE6. On a calendar that records Busy or Free, the EventKit seam
+        // reports the flag. On one that does not, the flag stays false.
+        let recorded = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isBusyOnAvailabilityCalendar: true
+        )
+        let notRecorded = StubEvent(isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26))
+        #expect(service.shouldBlockTime(recorded))
+        #expect(!service.shouldBlockTime(notRecorded))
+    }
+
+    @Test func allDayFree_blocksNothing() {
+        // AE7: a birthday marked Free.
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26), isFreeAvailability: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func timedOutOfOffice_stillBlocks() {
+        let (start, end) = busyHour()
+        #expect(service.shouldBlockTime(StubEvent(eventStart: start, eventEnd: end, isOutOfOffice: true)))
+    }
+
+    @Test func timedDeclinedOutOfOffice_blocksNothing() {
+        let (start, end) = busyHour()
+        let event = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true, isOutOfOffice: true)
         #expect(!service.shouldBlockTime(event))
     }
 }

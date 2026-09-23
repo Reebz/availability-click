@@ -23,6 +23,8 @@ protocol BlockableEvent {
     var isCanceled: Bool { get }
     var isFreeAvailability: Bool { get }
     var isDeclinedByCurrentUser: Bool { get }
+    var isOutOfOffice: Bool { get }
+    var isBusyOnAvailabilityCalendar: Bool { get }
 }
 
 extension EKEvent: BlockableEvent {
@@ -35,6 +37,13 @@ extension EKEvent: BlockableEvent {
               let me = attendees.first(where: { $0.isCurrentUser }) else { return false }
         return me.participantStatus == .declined
     }
+    var isOutOfOffice: Bool { availability == .unavailable }
+    /// Busy is the default availability value, so it only counts on a
+    /// calendar that records availability (R8, KTD4). Calendars that do not
+    /// record it report no supported availabilities.
+    var isBusyOnAvailabilityCalendar: Bool {
+        availability == .busy && !(calendar?.supportedEventAvailabilities.isEmpty ?? true)
+    }
 }
 
 struct AvailabilityService {
@@ -45,7 +54,7 @@ struct AvailabilityService {
     // MARK: - Public API
 
     func calculateAvailability(
-        events: [EKEvent],
+        events: [any BlockableEvent],
         rangeType: DateRangeType,
         now: Date = Date()
     ) -> [Date: [TimeSlot]] {
@@ -120,12 +129,16 @@ struct AvailabilityService {
 
     // MARK: - Event Filtering
 
+    /// Check order is fixed (KTD5): canceled, shown as Free, and declined never
+    /// block. An all-day event then blocks only when it marks the sender away
+    /// (R7-R9). Every remaining timed event blocks.
     func shouldBlockTime(_ event: some BlockableEvent) -> Bool {
-        if event.isAllDay { return false }
-        if isEffectivelyAllDay(event) { return false }
         if event.isCanceled { return false }
         if event.isFreeAvailability { return false }
         if event.isDeclinedByCurrentUser { return false }
+        if event.isAllDay || isEffectivelyAllDay(event) {
+            return event.isOutOfOffice || event.isBusyOnAvailabilityCalendar
+        }
         return true
     }
 
@@ -445,7 +458,7 @@ struct AvailabilityService {
         return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)!
     }
 
-    private func groupEventsByDay(_ events: [EKEvent], clampedTo range: Range<Date>) -> [Date: [TimeSlot]] {
+    private func groupEventsByDay(_ events: [any BlockableEvent], clampedTo range: Range<Date>) -> [Date: [TimeSlot]] {
         var grouped: [Date: [TimeSlot]] = [:]
 
         for event in events {
@@ -458,16 +471,16 @@ struct AvailabilityService {
         return grouped
     }
 
-    private func sliceEventIntoDays(_ event: EKEvent, clampedTo range: Range<Date>) -> [(day: Date, start: Date, end: Date)] {
+    private func sliceEventIntoDays(_ event: any BlockableEvent, clampedTo range: Range<Date>) -> [(day: Date, start: Date, end: Date)] {
         var slices: [(Date, Date, Date)] = []
         // range.lowerBound is a startOfDay, so the cursor stays day-aligned.
-        var cursor = max(calendar.startOfDay(for: event.startDate), range.lowerBound)
-        let endLimit = min(event.endDate, range.upperBound)
+        var cursor = max(calendar.startOfDay(for: event.eventStart), range.lowerBound)
+        let endLimit = min(event.eventEnd, range.upperBound)
 
         while cursor < endLimit {
             guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            let sliceStart = max(event.startDate, cursor)
-            let sliceEnd = min(event.endDate, nextDay)
+            let sliceStart = max(event.eventStart, cursor)
+            let sliceEnd = min(event.eventEnd, nextDay)
             if sliceStart < sliceEnd {
                 slices.append((cursor, sliceStart, sliceEnd))
             }
