@@ -2433,6 +2433,180 @@ struct TimezoneLabelTests {
 }
 
 // ============================================================================
+// MARK: - Clock-Change Timezone Line Tests (v1.3 U1, R1-R6/R21)
+// ============================================================================
+
+@Suite("Clock-Change Timezone Line")
+struct ClockChangeLineTests {
+    private let enUS = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
+
+    private func zone(_ id: String) -> TimeZone {
+        TimeZone(identifier: id)!
+    }
+
+    /// A moment given as wall-clock time in `tz`, so each fixture means the
+    /// same thing on this Mac and on the UTC CI runner.
+    private func at(_ tz: TimeZone, _ month: Int, _ day: Int, _ hour: Int = 9) -> Date {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = tz
+        return c.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour))!
+    }
+
+    /// One-hour slots at 9am local time on each (month, day) in 2026.
+    private func slots(_ tz: TimeZone, _ days: [(Int, Int)]) -> [Date: [TimeSlot]] {
+        var result: [Date: [TimeSlot]] = [:]
+        for (month, day) in days {
+            let start = at(tz, month, day)
+            result[at(tz, month, day, 0), default: []]
+                .append(TimeSlot(start: start, end: start.addingTimeInterval(3600)))
+        }
+        return result
+    }
+
+    private func lastLine(_ text: String) -> String {
+        text.split(separator: "\n").map(String.init).last ?? ""
+    }
+
+    /// The zone name follows the Mac's locale, so it is read, not hardcoded.
+    private func name(_ tz: TimeZone) -> String {
+        AvailabilityFormatter.localizedZoneName(for: tz)
+    }
+
+    /// Whole-hour "GMT+n", for fixtures in zones without half-hour offsets.
+    private func gmt(_ tz: TimeZone, _ date: Date) -> String {
+        String(format: "GMT%+d", tz.secondsFromGMT(for: date) / 3600)
+    }
+
+    @Test func offsetFollowsSlots_notTheCopyMoment() {
+        // AE1: copied before Sydney's Oct 4 switch, every slot is after it.
+        let sydney = zone("Australia/Sydney")
+        let input = slots(sydney, [(10, 5), (10, 6), (10, 7), (10, 8), (10, 9)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: sydney)
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+11)")
+    }
+
+    @Test func changeInsideRange_addsNewOffsetAndDate() {
+        // AE2
+        let sydney = zone("Australia/Sydney")
+        let input = slots(sydney, [(9, 24), (10, 1), (10, 8), (10, 22)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: sydney)
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun Oct 4)")
+    }
+
+    @Test func noDaylightSaving_matchesV121Line() {
+        // AE3: Brisbane has no clock changes, so the line is the v1.2.1 one.
+        let brisbane = zone("Australia/Brisbane")
+        let input = slots(brisbane, [(9, 24), (10, 1), (10, 8), (10, 22)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: brisbane)
+        #expect(lastLine(output) == "(\(AvailabilityFormatter.timezoneString(for: brisbane)))")
+        #expect(lastLine(output) == "(\(name(brisbane)), GMT+10)")
+    }
+
+    @Test func passedZone_usesItsOwnChange() {
+        // AE16: Berlin's Oct 25 switch, whatever zone this Mac is in.
+        let berlin = zone("Europe/Berlin")
+        let input = slots(berlin, [(10, 19), (10, 23), (10, 26), (10, 30)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: berlin)
+        #expect(lastLine(output) == "(\(name(berlin)), GMT+2, then GMT+1 from Sun Oct 25)")
+    }
+
+    @Test func twoChangesInRange_listedInDateOrder() throws {
+        // AE17. This Mac's zone data has no Morocco change after Sep 20, 2026,
+        // so the two Ramadan changes are found from the start of 2026.
+        let casablanca = zone("Africa/Casablanca")
+        let first = try #require(casablanca.nextDaylightSavingTimeTransition(after: at(casablanca, 1, 1, 0)))
+        let second = try #require(casablanca.nextDaylightSavingTimeTransition(after: first))
+        let before = first.addingTimeInterval(-86_400)
+        let after = second.addingTimeInterval(86_400)
+        if let third = casablanca.nextDaylightSavingTimeTransition(after: second) {
+            try #require(after < third)
+        }
+        let input: [Date: [TimeSlot]] = [
+            before: [TimeSlot(start: before, end: before.addingTimeInterval(3600))],
+            after: [TimeSlot(start: after, end: after.addingTimeInterval(3600))],
+        ]
+        let label = DateFormatter()
+        label.locale = Locale(identifier: "en_US")
+        label.timeZone = casablanca
+        label.dateFormat = "EEE MMM d"
+        let expected = "(\(name(casablanca)), \(gmt(casablanca, before)), "
+            + "then \(gmt(casablanca, first)) from \(label.string(from: first)), "
+            + "then \(gmt(casablanca, second)) from \(label.string(from: second)))"
+
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: casablanca)
+        #expect(lastLine(output) == expected)
+    }
+
+    @Test func halfHourZone_formatsBothOffsets() {
+        let lordHowe = zone("Australia/Lord_Howe")
+        let output = enUS.format(slots: slots(lordHowe, [(10, 1), (10, 8)]), showTimeZone: true, timezone: lordHowe)
+        #expect(lastLine(output) == "(\(name(lordHowe)), GMT+10:30, then GMT+11 from Sun Oct 4)")
+    }
+
+    @Test func changeDate_usesTheLocaleDayLabel() {
+        // R21: en_GB puts the day first in the day lines, so the change date does too.
+        let sydney = zone("Australia/Sydney")
+        let enGB = AvailabilityFormatter(locale: Locale(identifier: "en_GB"))
+        let output = enGB.format(slots: slots(sydney, [(9, 24), (10, 5)]), showTimeZone: true, timezone: sydney)
+        #expect(output.split(separator: "\n").contains { $0.hasPrefix("Mon 5 Oct:") })
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun 4 Oct)")
+    }
+
+    @Test func firstSlotAfterChange_oneOffsetNoChange() {
+        // 9am on Sun Oct 4 is hours after Sydney's 2am switch.
+        let sydney = zone("Australia/Sydney")
+        let output = enUS.format(slots: slots(sydney, [(10, 4), (10, 9)]), showTimeZone: true, timezone: sydney)
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+11)")
+    }
+
+    @Test func proposalSentence_listsChangeOnlyWhenItsSlotsCrossIt() {
+        let sydney = zone("Australia/Sydney")
+        func hourSlots(_ days: [(Int, Int)]) -> [TimeSlot] {
+            days.map { at(sydney, $0.0, $0.1) }.map { TimeSlot(start: $0, end: $0.addingTimeInterval(3600)) }
+        }
+        let crossing = enUS.formatProposal(
+            slots: hourSlots([(9, 30), (10, 1), (10, 6)]), showTimeZone: true, timezone: sydney
+        )
+        let allBefore = enUS.formatProposal(
+            slots: hourSlots([(9, 24), (9, 25), (9, 28)]), showTimeZone: true, timezone: sydney
+        )
+        #expect(lastLine(crossing) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun Oct 4)")
+        #expect(lastLine(allBefore) == "(\(name(sydney)), GMT+10)")
+    }
+
+    @Test func richText_carriesTheSameLineAsPlain() {
+        // Zone pinned to Sydney so the check still means something on a UTC runner.
+        let sydney = zone("Australia/Sydney")
+        let input = slots(sydney, [(9, 24), (10, 1), (10, 8), (10, 22)])
+        let plain = lastLine(enUS.format(slots: input, showTimeZone: true, timezone: sydney))
+        let rich = lastLine(enUS.formatAttributed(slots: input, showTimeZone: true, timezone: sydney).string)
+        #expect(rich == plain)
+        #expect(rich.hasSuffix("then GMT+11 from Sun Oct 4)"))
+    }
+
+    @Test func emptySlots_stayEmptyText() {
+        let sydney = zone("Australia/Sydney")
+        #expect(enUS.format(slots: [:], showTimeZone: true, timezone: sydney) == "")
+        #expect(enUS.formatProposal(slots: [], showTimeZone: true, timezone: sydney) == "")
+        #expect(enUS.formatAttributed(slots: [:], showTimeZone: true, timezone: sydney).length == 0)
+    }
+
+    @Test func zoneLabel_withoutDate_usesTheCurrentOffset() {
+        // AE4 / R6: picker rows and the Settings label describe the zone now.
+        let sydney = zone("Australia/Sydney")
+        #expect(AvailabilityFormatter.timezoneString(for: sydney) == AvailabilityFormatter.timezoneString(for: sydney, at: Date()))
+        #expect(AvailabilityFormatter.timezoneString(for: sydney, at: at(sydney, 9, 23)) == "\(name(sydney)), GMT+10")
+    }
+
+    @Test func slotSubtitleOffset_isTheOffsetAtThatSlot() {
+        // R4 / KTD10. The subtitle reads the system zone, so this goes
+        // through the same helper with the zone pinned.
+        let sydney = zone("Australia/Sydney")
+        #expect(AvailabilityFormatter.timezoneString(for: sydney, at: at(sydney, 10, 5)) == "\(name(sydney)), GMT+11")
+    }
+}
+
+// ============================================================================
 // MARK: - As-Of Stamp Tests (U3/R4)
 // ============================================================================
 

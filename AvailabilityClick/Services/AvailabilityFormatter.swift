@@ -39,7 +39,7 @@ struct AvailabilityFormatter {
         timezone: TimeZone? = nil,
         asOf: Date? = nil
     ) -> String {
-        guard !slots.isEmpty else { return "" }
+        guard let span = Self.startSpan(of: slots.values.joined()) else { return "" }
 
         let effectiveCalendar = calendar(for: timezone)
         var lines: [String] = []
@@ -53,7 +53,7 @@ struct AvailabilityFormatter {
             }
         }
 
-        appendTrailingLines(to: &lines, showTimeZone: showTimeZone, timezone: timezone, asOf: asOf)
+        appendTrailingLines(to: &lines, showTimeZone: showTimeZone, timezone: timezone, span: span, asOf: asOf)
 
         return lines.joined(separator: "\n")
     }
@@ -67,7 +67,7 @@ struct AvailabilityFormatter {
         timezone: TimeZone? = nil,
         asOf: Date? = nil
     ) -> NSAttributedString {
-        guard !slots.isEmpty else { return NSAttributedString() }
+        guard let span = Self.startSpan(of: slots.values.joined()) else { return NSAttributedString() }
 
         let effectiveCalendar = calendar(for: timezone)
         let fontSize = NSFont.systemFontSize
@@ -85,7 +85,7 @@ struct AvailabilityFormatter {
 
         if showTimeZone {
             result.append(NSAttributedString(
-                string: "\n(\(Self.timezoneString(for: timezone)))",
+                string: "\n\(timezoneLine(timezone: timezone, spanning: span))",
                 attributes: plain
             ))
         }
@@ -133,15 +133,17 @@ struct AvailabilityFormatter {
     /// Appends the optional timezone label and as-of stamp — the trailing lines
     /// shared by the grid (`format`) and proposal (`formatProposal`) string
     /// renderers — so their composition can't drift. The attributed renderer
-    /// builds the same two lines in NSAttributedString form.
+    /// builds the same two lines in NSAttributedString form, from the same
+    /// `timezoneLine`.
     private func appendTrailingLines(
         to lines: inout [String],
         showTimeZone: Bool,
         timezone: TimeZone?,
+        span: ClosedRange<Date>,
         asOf: Date?
     ) {
         if showTimeZone {
-            lines.append("(\(Self.timezoneString(for: timezone)))")
+            lines.append(timezoneLine(timezone: timezone, spanning: span))
         }
         if let asOf {
             lines.append(asOfLine(asOf, timezone: timezone))
@@ -162,7 +164,7 @@ struct AvailabilityFormatter {
         timezone: TimeZone? = nil,
         asOf: Date? = nil
     ) -> String {
-        guard !slots.isEmpty else { return "" }
+        guard let span = Self.startSpan(of: slots) else { return "" }
 
         let effectiveCalendar = calendar(for: timezone)
         let labelFormatter = dayLabelFormatter(timeZone: effectiveCalendar.timeZone)
@@ -180,9 +182,59 @@ struct AvailabilityFormatter {
             lines.append("Here are a few times that could work — reply with a number: \(items.joined(separator: "; ")).")
         }
 
-        appendTrailingLines(to: &lines, showTimeZone: showTimeZone, timezone: timezone, asOf: asOf)
+        appendTrailingLines(to: &lines, showTimeZone: showTimeZone, timezone: timezone, span: span, asOf: asOf)
 
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Timezone Line (v1.3 U1)
+
+    /// The timezone line under offered slots, for every renderer (KTD3). The
+    /// offset is the one in effect at the first slot (R1), and each clock
+    /// change up to the last slot adds its new offset and start date (R2), as
+    /// in "(Sydney Time, GMT+10, then GMT+11 from Sun Oct 4)". The change date
+    /// uses the same day label as the day lines (R21).
+    private func timezoneLine(timezone: TimeZone?, spanning span: ClosedRange<Date>) -> String {
+        let tz = timezone ?? TimeZone.current
+        var text = Self.timezoneString(for: tz, at: span.lowerBound)
+        let changes = Self.clockChanges(in: tz, from: span.lowerBound, through: span.upperBound)
+        if !changes.isEmpty {
+            let labelFormatter = dayLabelFormatter(timeZone: tz)
+            for change in changes {
+                text += ", then \(Self.gmtOffset(for: tz, at: change)) from \(labelFormatter.string(from: change))"
+            }
+        }
+        return "(\(text))"
+    }
+
+    /// The first and last slot starts, or nil when there are no slots.
+    private static func startSpan(of slots: some Sequence<TimeSlot>) -> ClosedRange<Date>? {
+        let starts = slots.map(\.start)
+        guard let first = starts.min(), let last = starts.max() else { return nil }
+        return first...last
+    }
+
+    /// Every daylight-saving change in `tz` after `start`, up to and including
+    /// `end`, read from the zone's own transition data (KTD2). Zones without
+    /// daylight saving return none, so a range with no change needs no special
+    /// case (R5). A transition that leaves the offset unchanged is skipped,
+    /// because the line only reports offsets. The cap stops a runaway loop on
+    /// bad zone data, far above the few changes any zone makes in a year.
+    private static func clockChanges(in tz: TimeZone, from start: Date, through end: Date) -> [Date] {
+        var changes: [Date] = []
+        var cursor = start
+        var offset = tz.secondsFromGMT(for: start)
+        for _ in 0..<32 {
+            guard let next = tz.nextDaylightSavingTimeTransition(after: cursor),
+                  next > cursor, next <= end else { break }
+            let nextOffset = tz.secondsFromGMT(for: next)
+            if nextOffset != offset {
+                changes.append(next)
+                offset = nextOffset
+            }
+            cursor = next
+        }
+        return changes
     }
 
     // MARK: - Shared Line Building
@@ -319,18 +371,25 @@ struct AvailabilityFormatter {
     /// `abbreviation()`, which returns the offset form ("GMT+2") for most
     /// zones and rendered a duplicated "(GMT+2, GMT+2)". The name now comes
     /// from `localizedZoneName` (KTD8); the offset is appended once.
-    static func timezoneString(for timezone: TimeZone? = nil) -> String {
+    ///
+    /// The offset is the one in effect at `date` (KTD1). Labels that describe
+    /// a zone leave it at now (R6). Labels that describe slots pass a slot's
+    /// start.
+    static func timezoneString(for timezone: TimeZone? = nil, at date: Date = Date()) -> String {
         let tz = timezone ?? TimeZone.current
-        let seconds = tz.secondsFromGMT()
+        return "\(localizedZoneName(for: tz)), \(gmtOffset(for: tz, at: date))"
+    }
+
+    /// "GMT+10" or "GMT+10:30" for the offset `tz` has at `date`. The one
+    /// source of the offset text in every label.
+    private static func gmtOffset(for tz: TimeZone, at date: Date) -> String {
+        let seconds = tz.secondsFromGMT(for: date)
         let hours = seconds / 3600
         let minutes = abs(seconds / 60) % 60
-        let gmtOffset: String
         if minutes == 0 {
-            gmtOffset = String(format: "GMT%+d", hours)
-        } else {
-            gmtOffset = String(format: "GMT%+d:%02d", hours, minutes)
+            return String(format: "GMT%+d", hours)
         }
-        return "\(localizedZoneName(for: tz)), \(gmtOffset)"
+        return String(format: "GMT%+d:%02d", hours, minutes)
     }
 
     /// The human-readable half of `timezoneString` (KTD8 fallback chain).
