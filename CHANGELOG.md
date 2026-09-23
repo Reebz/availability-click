@@ -2,6 +2,22 @@
 
 All notable changes to Availability Click are documented here.
 
+## v1.3.0
+
+Four fixes that keep pasted availability true to your calendar.
+
+New:
+
+- A Settings option, off by default, treats your Maybe replies and events shown as Tentative as free time.
+- The Get Availability Shortcuts action takes an optional time zone, such as Europe/Berlin, and returns the times in that zone with a time zone line. A zone it doesn't recognize stops the Shortcut with an error that names it.
+
+Improved:
+
+- All-day events marked Out of Office, or marked Busy on a calendar that tracks Busy and Free, now block the day. Birthdays, holidays, and other all-day events still don't.
+- The time zone line states the GMT offset for the times offered, not for the moment you copied, and names any clock change inside the range, as in "GMT+10, then GMT+11 from Sun Oct 4". The Shortcuts text output follows clock changes the same way, and each slot from Get Availability Slots shows its own offset.
+
+Still App-Sandboxed with calendar access as the only entitlement. No network, no analytics, no tracking. Signed with a Developer ID and notarized by Apple.
+
 ## v1.2.1
 
 - The app icon now appears in the Cmd+Tab switcher and the Dock while the Settings window is open. Earlier builds bundled no icon, so it showed up blank there.
