@@ -949,6 +949,25 @@ struct AvailabilityCalculationTests {
         }
     }
 
+    @Test func daySlices_stayKeyedAtDayStart_whenAClockChangeSkipsMidnight() throws {
+        // Out of Office Fri Sep 4 to Fri Sep 11, 2026 in Santiago, where clocks
+        // jump from Sat 24:00 to Sun 01:00 on Sep 6. Every day after the jump
+        // must still be keyed at its start, or it would read as free.
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = try #require(TimeZone(identifier: "America/Santiago"))
+        func day(_ month: Int, _ d: Int, _ h: Int = 0, _ m: Int = 0, _ s: Int = 0) -> Date {
+            santiago.date(from: DateComponents(year: 2026, month: month, day: d, hour: h, minute: m, second: s))!
+        }
+        let slices = AvailabilityService.daySlices(
+            from: day(9, 4), to: day(9, 11, 23, 59, 59), clampedTo: day(8, 31)..<day(9, 14), calendar: santiago
+        )
+        let keys = slices.map(\.day)
+        #expect(keys.count == 8)
+        #expect(keys.allSatisfy { santiago.startOfDay(for: $0) == $0 })
+        #expect(keys.contains(day(9, 7)))
+        #expect(keys.contains(day(9, 11)))
+    }
+
     @Test func tentativeSettingOn_leavesTentativeTimeFree() async {
         // v1.3 U3: a Tentative 10-11 meeting next Monday.
         var pinned: [String: Any] = stockWorkingSettings
@@ -2582,8 +2601,8 @@ struct TimezoneLabelTests {
         // A bare fixed-offset zone has no human name — .shortGeneric may be
         // nil or itself an offset. The point of the seam is that the chain
         // never crashes and always yields a non-empty string (named zones the
-        // picker actually offers get the readable name tested above). Such a
-        // synthetic zone is not selectable in the app.
+        // picker actually offers get the readable name tested above). The
+        // preview cannot select such a zone, but a Shortcut can pass one.
         let tz = try #require(TimeZone(secondsFromGMT: 5 * 3600))
         let name = AvailabilityFormatter.localizedZoneName(for: tz)
         #expect(!name.isEmpty)
@@ -2721,6 +2740,34 @@ struct ClockChangeLineTests {
         let output = enGB.format(slots: slots(sydney, [(9, 24), (10, 5)]), showTimeZone: true, timezone: sydney)
         #expect(output.split(separator: "\n").contains { $0.hasPrefix("Mon 5 Oct:") })
         #expect(lastLine(output) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun 4 Oct)")
+    }
+
+    @Test func midnightFallBack_namesTheFirstDayOnTheNewOffset() {
+        // Egypt turns clocks back at 24:00 on Thu Oct 29, 2026. Thursday's
+        // working hours are all still GMT+3, so the change reads from Friday.
+        let cairo = zone("Africa/Cairo")
+        let output = enUS.format(slots: slots(cairo, [(10, 28), (10, 29), (10, 30)]), showTimeZone: true, timezone: cairo)
+        #expect(lastLine(output) == "(\(name(cairo)), GMT+3, then GMT+2 from Fri Oct 30)")
+
+        // Chile does the same at 24:00 on Sat Apr 4, 2026.
+        let santiago = zone("America/Santiago")
+        let chile = enUS.format(slots: slots(santiago, [(4, 2), (4, 6)]), showTimeZone: true, timezone: santiago)
+        #expect(lastLine(chile) == "(\(name(santiago)), GMT-3, then GMT-4 from Sun Apr 5)")
+    }
+
+    @Test func fixedOffsetZones_showOneCorrectlySignedOffset() throws {
+        // A Shortcut can pass UTC+10 or UTC-0:30 (U4), and those zones have no
+        // name beyond their offset.
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "GMT+1000"))) == "GMT+10")
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "GMT-0030"))) == "GMT-0:30")
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "Etc/GMT-10"))) == "GMT+10")
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "America/St_Johns")), at: at(zone("America/St_Johns"), 1, 15)).hasSuffix(", GMT-3:30"))
+
+        let slots = slots(zone("Australia/Sydney"), [(10, 5)])
+        let plusTen = GetAvailabilityIntent.composeText(slots: slots, timezone: try TimeZoneCatalog.resolve("UTC+10"), showTimeZone: false)
+        let minusHalf = GetAvailabilityIntent.composeText(slots: slots, timezone: try TimeZoneCatalog.resolve("UTC-0:30"), showTimeZone: false)
+        #expect(lastLine(plusTen) == "(GMT+10)")
+        #expect(lastLine(minusHalf) == "(GMT-0:30)")
     }
 
     @Test func firstSlotAfterChange_oneOffsetNoChange() {

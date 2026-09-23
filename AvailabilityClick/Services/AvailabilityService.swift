@@ -484,15 +484,32 @@ struct AvailabilityService {
     }
 
     private func sliceEventIntoDays(_ event: any BlockableEvent, clampedTo range: Range<Date>) -> [(day: Date, start: Date, end: Date)] {
+        Self.daySlices(from: event.eventStart, to: event.eventEnd, clampedTo: range, calendar: calendar)
+    }
+
+    /// One slice per day an event covers, keyed by that day's start. Static
+    /// and internal so tests can pass a calendar in a zone whose clock change
+    /// skips midnight.
+    static func daySlices(
+        from eventStart: Date,
+        to eventEnd: Date,
+        clampedTo range: Range<Date>,
+        calendar: Calendar
+    ) -> [(day: Date, start: Date, end: Date)] {
         var slices: [(Date, Date, Date)] = []
-        // range.lowerBound is a startOfDay, so the cursor stays day-aligned.
-        var cursor = max(calendar.startOfDay(for: event.eventStart), range.lowerBound)
-        let endLimit = min(event.eventEnd, range.upperBound)
+        var cursor = max(calendar.startOfDay(for: eventStart), range.lowerBound)
+        let endLimit = min(eventEnd, range.upperBound)
 
         while cursor < endLimit {
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            let sliceStart = max(event.eventStart, cursor)
-            let sliceEnd = min(event.eventEnd, nextDay)
+            // Snap each step back to the day's start. Where a clock change
+            // skips midnight (Santiago, the Azores), a day added to 00:00 lands
+            // on 01:00, and every later key would then miss the startOfDay
+            // lookup in calculateAvailability.
+            guard let step = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            let nextDay = calendar.startOfDay(for: step)
+            guard nextDay > cursor else { break }
+            let sliceStart = max(eventStart, cursor)
+            let sliceEnd = min(eventEnd, nextDay)
             if sliceStart < sliceEnd {
                 slices.append((cursor, sliceStart, sliceEnd))
             }

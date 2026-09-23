@@ -201,7 +201,12 @@ struct AvailabilityFormatter {
         if !changes.isEmpty {
             let labelFormatter = dayLabelFormatter(timeZone: tz)
             for change in changes {
-                text += ", then \(Self.gmtOffset(for: tz, at: change)) from \(labelFormatter.string(from: change))"
+                // Label the change on the later of its two wall-clock readings.
+                // A zone that turns clocks back at midnight (Cairo) reads 23:00
+                // of the day before on the new offset, and every working hour
+                // of that day is still on the old offset.
+                let labelDate = change.at.addingTimeInterval(TimeInterval(max(0, change.from - change.to)))
+                text += ", then \(Self.gmtOffset(seconds: change.to)) from \(labelFormatter.string(from: labelDate))"
             }
         }
         return "(\(text))"
@@ -215,13 +220,16 @@ struct AvailabilityFormatter {
     }
 
     /// Every daylight-saving change in `tz` after `start`, up to and including
-    /// `end`, read from the zone's own transition data (KTD2). Zones without
-    /// daylight saving return none, so a range with no change needs no special
-    /// case (R5). A transition that leaves the offset unchanged is skipped,
-    /// because the line only reports offsets. The cap stops a runaway loop on
-    /// bad zone data, far above the few changes any zone makes in a year.
-    private static func clockChanges(in tz: TimeZone, from start: Date, through end: Date) -> [Date] {
-        var changes: [Date] = []
+    /// `end`, with the offsets in seconds before and after it, read from the
+    /// zone's own transition data (KTD2). Zones without daylight saving return
+    /// none, so a range with no change needs no special case (R5). A
+    /// transition that leaves the offset unchanged is skipped, because the
+    /// line only reports offsets. The cap stops a runaway loop on bad zone
+    /// data, far above the few changes any zone makes in a year.
+    private static func clockChanges(
+        in tz: TimeZone, from start: Date, through end: Date
+    ) -> [(at: Date, from: Int, to: Int)] {
+        var changes: [(at: Date, from: Int, to: Int)] = []
         var cursor = start
         var offset = tz.secondsFromGMT(for: start)
         for _ in 0..<32 {
@@ -229,7 +237,7 @@ struct AvailabilityFormatter {
                   next > cursor, next <= end else { break }
             let nextOffset = tz.secondsFromGMT(for: next)
             if nextOffset != offset {
-                changes.append(next)
+                changes.append((next, offset, nextOffset))
                 offset = nextOffset
             }
             cursor = next
@@ -377,19 +385,26 @@ struct AvailabilityFormatter {
     /// start.
     static func timezoneString(for timezone: TimeZone? = nil, at date: Date = Date()) -> String {
         let tz = timezone ?? TimeZone.current
-        return "\(localizedZoneName(for: tz)), \(gmtOffset(for: tz, at: date))"
+        let offset = gmtOffset(seconds: tz.secondsFromGMT(for: date))
+        // A fixed-offset zone, such as a Shortcut's UTC+10, has no name beyond
+        // its offset, so the offset appears once rather than "GMT+10, GMT+10".
+        if ["GMT+", "GMT-", "Etc/GMT+", "Etc/GMT-"].contains(where: { tz.identifier.hasPrefix($0) }) {
+            return offset
+        }
+        return "\(localizedZoneName(for: tz)), \(offset)"
     }
 
-    /// "GMT+10" or "GMT+10:30" for the offset `tz` has at `date`. The one
-    /// source of the offset text in every label.
-    private static func gmtOffset(for tz: TimeZone, at date: Date) -> String {
-        let seconds = tz.secondsFromGMT(for: date)
-        let hours = seconds / 3600
-        let minutes = abs(seconds / 60) % 60
+    /// "GMT+10", "GMT+10:30", or "GMT-0:30" for an offset in seconds. The one
+    /// source of the offset text in every label. The sign is taken on its own
+    /// so an offset between -1h and 0 keeps its minus.
+    private static func gmtOffset(seconds: Int) -> String {
+        let sign = seconds < 0 ? "-" : "+"
+        let hours = abs(seconds) / 3600
+        let minutes = abs(seconds) / 60 % 60
         if minutes == 0 {
-            return String(format: "GMT%+d", hours)
+            return "GMT\(sign)\(hours)"
         }
-        return String(format: "GMT%+d:%02d", hours, minutes)
+        return "GMT\(sign)\(hours):" + String(format: "%02d", minutes)
     }
 
     /// The human-readable half of `timezoneString` (KTD8 fallback chain).
