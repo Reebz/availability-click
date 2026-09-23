@@ -1622,6 +1622,7 @@ struct AppIntentMappingTests {
         var textIntent = GetAvailabilityIntent()
         textIntent.range = .nextWeek
         textIntent.businessDays = 5
+        textIntent.timeZone = "Europe/Berlin"   // v1.3 addition (R18)
         var slotsIntent = GetAvailabilitySlotsIntent()
         slotsIntent.range = .next30Days
         slotsIntent.businessDays = 10
@@ -1630,6 +1631,7 @@ struct AppIntentMappingTests {
         s.endDate = date(2026, 3, 25, 10, 0)
         s.durationMinutes = 60
         #expect(textIntent.businessDays == 5 && slotsIntent.businessDays == 10)
+        #expect(textIntent.timeZone == "Europe/Berlin")
         #expect(s.durationMinutes == 60)
     }
 
@@ -2864,6 +2866,74 @@ struct TimeZoneResolverTests {
 
     @Test func shortcutsPickerList_isEveryKnownZoneInOrder() {
         #expect(TimeZoneCatalog.identifiers == TimeZone.knownTimeZoneIdentifiers.sorted())
+    }
+}
+
+// ============================================================================
+// MARK: - Shortcut Timezone Input Tests (v1.3 U5, R15/R16/R20)
+// ============================================================================
+
+@Suite("Shortcut Timezone Input")
+struct ShortcutTimezoneInputTests {
+    private let berlin = TimeZone(identifier: "Europe/Berlin")!
+
+    /// 21:00-22:00 UTC on Tue Oct 20, 2026: late Tuesday in Berlin, early
+    /// Wednesday in Sydney.
+    private var lateTuesdayInBerlin: [Date: [TimeSlot]] {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let start = utc.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 21))!
+        return [start: [TimeSlot(start: start, end: start.addingTimeInterval(3600))]]
+    }
+
+    private func weekday(_ date: Date, in tz: TimeZone) -> String {
+        let f = DateFormatter()
+        f.locale = .autoupdatingCurrent
+        f.timeZone = tz
+        f.dateFormat = "EEE"
+        return f.string(from: date)
+    }
+
+    @Test func zoneGiven_usesItAndForcesTheLine() throws {
+        // AE10: "Show recipient timezone" off, Europe/Berlin passed.
+        let slots = lateTuesdayInBerlin
+        let start = try #require(slots.values.first?.first?.start)
+        let text = GetAvailabilityIntent.composeText(slots: slots, timezone: berlin, showTimeZone: false)
+        let lines = text.split(separator: "\n").map(String.init)
+
+        #expect(text == AvailabilityFormatter().format(slots: slots, showTimeZone: true, template: .plainText, timezone: berlin))
+        #expect(lines.first?.hasPrefix(weekday(start, in: berlin)) == true)
+        #expect(lines.last == "(\(AvailabilityFormatter.localizedZoneName(for: berlin)), GMT+2)")
+    }
+
+    @Test func noZone_matchesTheV121Output() {
+        // AE12: the text the v1.2.1 action returned for the same slots and settings.
+        let slots = lateTuesdayInBerlin
+        for showTimeZone in [false, true] {
+            #expect(
+                GetAvailabilityIntent.composeText(slots: slots, timezone: nil, showTimeZone: showTimeZone)
+                    == AvailabilityFormatter().format(slots: slots, showTimeZone: showTimeZone, template: .plainText)
+            )
+        }
+    }
+
+    @Test func noZone_lineSetting_addsSystemZoneLine() throws {
+        let slots = lateTuesdayInBerlin
+        let start = try #require(slots.values.first?.first?.start)
+        let off = GetAvailabilityIntent.composeText(slots: slots, timezone: nil, showTimeZone: false)
+        let on = GetAvailabilityIntent.composeText(slots: slots, timezone: nil, showTimeZone: true)
+        #expect(!off.contains("GMT"))
+        #expect(on.split(separator: "\n").last.map(String.init) == "(\(AvailabilityFormatter.timezoneString(at: start)))")
+    }
+
+    @Test func noSlots_emptyText_withOrWithoutZone() {
+        // AE18 / R20
+        #expect(GetAvailabilityIntent.composeText(slots: [:], timezone: berlin, showTimeZone: false) == "")
+        #expect(GetAvailabilityIntent.composeText(slots: [:], timezone: nil, showTimeZone: true) == "")
+    }
+
+    @Test func picker_listsTheSharedZoneList() async throws {
+        #expect(try await TimeZoneOptionsProvider().results() == TimeZoneCatalog.identifiers)
     }
 }
 
