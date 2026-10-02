@@ -41,6 +41,9 @@ enum AvailabilityRange: String, AppEnum {
 enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
     case calendarAccessNotGranted
     case noCalendarsAvailable
+    /// Additive under KTD3: the timezone input named no zone the app accepts
+    /// (R17). Carries the trimmed text so the message can name it.
+    case unknownTimeZone(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -48,6 +51,8 @@ enum GetAvailabilityError: Error, CustomLocalizedStringResourceConvertible {
             "Availability Click doesn't have calendar access. Open the Availability Click app and click its menu bar icon to trigger the permission prompt, then run this action again."
         case .noCalendarsAvailable:
             "No calendars are available on this Mac. Add a calendar account in System Settings, then run this action again."
+        case .unknownTimeZone(let value):
+            "Availability Click doesn't recognize the time zone \"\(value)\". Use a name such as Europe/Berlin or America/New_York, or leave the time zone empty to use this Mac's own."
         }
     }
 }
@@ -89,6 +94,16 @@ func resolveAvailabilitySlots(range: AvailabilityRange, businessDays: Int?) asyn
     return service.calculateAvailability(events: events, rangeType: rangeType, now: now)
 }
 
+/// Options for the Get Availability timezone input (KTD7): every known zone
+/// identifier. The input stays free text, so a Shortcut can also pass a zone
+/// in a variable, and the resolver catches typos (R17). No default is set, so
+/// an input left unset stays empty (R15).
+struct TimeZoneOptionsProvider: DynamicOptionsProvider {
+    func results() async throws -> [String] {
+        TimeZoneCatalog.identifiers
+    }
+}
+
 /// Read-only, interactive-safe (KTD6): returns the formatted availability
 /// string without opening UI, flashing the icon, touching the clipboard, or
 /// triggering the system permission prompt.
@@ -113,18 +128,39 @@ struct GetAvailabilityIntent: AppIntent {
     )
     var businessDays: Int?
 
+    /// Additive under KTD3: an optional zone for the output, such as
+    /// Europe/Berlin. Empty or blank leaves the output as it was without the
+    /// input (R15). A zone always adds the timezone line (R16). Frozen once
+    /// shipped.
+    @Parameter(
+        title: "Time zone",
+        description: "Optional. Lists the times in this time zone, such as Europe/Berlin, and adds a time zone line.",
+        optionsProvider: TimeZoneOptionsProvider()
+    )
+    var timeZone: String?
+
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // Mark the headless launch before resolving the zone, the way
+        // resolveAvailabilitySlots does, so a mistyped zone on a cold
+        // unattended run fails without the permission prompt or the coach.
+        AppDelegate.intentDidRunThisLaunch = true
+        let zone = try TimeZoneCatalog.resolve(timeZone)
         let slots = try await resolveAvailabilitySlots(range: range, businessDays: businessDays)
+        return .result(value: Self.composeText(slots: slots, timezone: zone, showTimeZone: AppSettings.showTimeZone))
+    }
 
-        // Always the plain-text template: markdown syntax is unwanted
-        // mid-automation (KTD6).
-        let text = AvailabilityFormatter().format(
+    /// The text step after slot resolution (KTD9). Pure, so R15, R16, and R20
+    /// are testable with fixed slots. Always the plain-text template:
+    /// markdown syntax is unwanted mid-automation (KTD6). A given zone forces
+    /// the timezone line on, and no slots give empty text.
+    static func composeText(slots: [Date: [TimeSlot]], timezone: TimeZone?, showTimeZone: Bool) -> String {
+        AvailabilityFormatter().format(
             slots: slots,
-            showTimeZone: AppSettings.showTimeZone,
-            template: .plainText
+            showTimeZone: showTimeZone || timezone != nil,
+            template: .plainText,
+            timezone: timezone
         )
-        return .result(value: text)
     }
 }
 

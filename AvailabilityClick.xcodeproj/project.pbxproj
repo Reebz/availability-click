@@ -18,6 +18,7 @@
 		4EDCA655F151D1137B40367B /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEACB52A8D6D2A3FEABED901 /* ShortcutRecorderView.swift */; };
 		61DAA575EE41774A9F7712EB /* GlobalShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5B4D99DB879D1AABBDC26E /* GlobalShortcutManager.swift */; };
 		7410B3831AC832BEAC190D23 /* GetAvailabilityIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9591F2475B8190DD2D6521 /* GetAvailabilityIntent.swift */; };
+		7A7040588AFE2084FE804027 /* TimeZoneCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66BC9A4CF640C2D5A79DBCEA /* TimeZoneCatalog.swift */; };
 		7AE86B3A1A587FA4C12C9011 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 732056A73A89431D70236ADA /* StatusItemController.swift */; };
 		98117A9B39BE9A67267D9ED7 /* TimeSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D9FF7FE6F4B6C3BB42C24F /* TimeSlot.swift */; };
 		9E3B46203B285DE6C134EC81 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D452BE895B656488DFB58C4 /* AppSettings.swift */; };
@@ -49,6 +50,7 @@
 		5516989F5FE62CDD124F25C0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		569E959708F1407090998FA6 /* AvailabilityClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityClickTests.swift; sourceTree = "<group>"; };
 		59487AD55C94701B16B4E41D /* AvailabilityClick.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AvailabilityClick.entitlements; sourceTree = "<group>"; };
+		66BC9A4CF640C2D5A79DBCEA /* TimeZoneCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeZoneCatalog.swift; sourceTree = "<group>"; };
 		6D452BE895B656488DFB58C4 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		732056A73A89431D70236ADA /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		73D9FF7FE6F4B6C3BB42C24F /* TimeSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeSlot.swift; sourceTree = "<group>"; };
@@ -106,6 +108,7 @@
 				0192A9AC472B7CADA4FA77A1 /* AvailabilityFormatter.swift */,
 				46AE9A0A29A6E2EA167DB8D0 /* AvailabilityService.swift */,
 				4FA5E464634B2A4B022394A2 /* CalendarService.swift */,
+				66BC9A4CF640C2D5A79DBCEA /* TimeZoneCatalog.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -155,7 +158,7 @@
 			path = Intents;
 			sourceTree = "<group>";
 		};
-		"TEMP_401C3200-6998-4DC0-A28B-2E49AA672508" /* .claude */ = {
+		"TEMP_F98910C8-E129-4B5B-89E6-CD840783F2A5" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -264,6 +267,7 @@
 				4EDCA655F151D1137B40367B /* ShortcutRecorderView.swift in Sources */,
 				7AE86B3A1A587FA4C12C9011 /* StatusItemController.swift in Sources */,
 				98117A9B39BE9A67267D9ED7 /* TimeSlot.swift in Sources */,
+				7A7040588AFE2084FE804027 /* TimeZoneCatalog.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -333,7 +337,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -347,7 +351,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.availabilityclick.AvailabilityClick;
@@ -410,7 +414,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -430,7 +434,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

@@ -61,7 +61,7 @@ Right-click the menu bar icon for longer date ranges, your current version, Chec
 - Declined meetings don't block your time
 - Cancelled events are excluded
 - Events you've marked as "free" (focus time blocks, etc.) are excluded
-- All-day events don't block time slots
+- All-day events don't block time slots, unless they're marked Out of Office, or Busy on a calendar that tracks Busy and Free
 - If you click on a Friday evening or weekend, it rolls forward to next week automatically
 
 **Configurable**
@@ -73,7 +73,8 @@ Right-click the menu bar icon for longer date ranges, your current version, Chec
 - Slot rounding: snap times to clean 5, 10, 15, or 30-minute boundaries
 - Minimum slot duration: hide gaps shorter than 15, 30, 45, or 60 minutes
 - Output format: plain text or Markdown
-- Time zone with GMT offset
+- Tentative events: optionally treat your Maybe replies and events shown as Tentative as free
+- Time zone line with the GMT offset for the times offered, naming any clock change inside the range
 
 **Preview popover (Option+click)**
 - See the formatted text before it hits the clipboard
@@ -89,6 +90,8 @@ The Shortcuts actions are a stable contract. There are two:
 - **Get Availability Slots** returns them as structured entities - each with a raw `startDate`, `endDate`, and `durationMinutes` - so a Shortcut can compose its own output. The result card shows a formatted time range and your time zone; the value fields stay raw dates.
 
 Both take a **Range** (the same choices as the menu, plus your configured default) and an optional **Business days** override (2-30; out-of-range values are clamped). Both read your stored settings - buffer, calendar selection, rounding, minimum slot - so a Shortcut sees exactly what a click would. Both require the Mac to be unlocked, and neither writes to the clipboard.
+
+Get Availability also takes an optional **Time zone** (such as Europe/Berlin), which lists the times in that zone with a time zone line and stops the Shortcut with an error naming the value if the app doesn't recognize it.
 
 The names are frozen: intent names, parameter names, and entity property names will not be renamed or retyped, because a rename would break every Shortcut built on them. New parameters and new intents are the only way this surface evolves.
 
@@ -107,7 +110,7 @@ One scoping note: the Shortcuts action hands your availability text to your own 
 - Zero third-party dependencies
 - XcodeGen for project generation
 - macOS 14.0+ (Sonoma)
-- 247 tests across twenty-eight suites
+- 295 tests across thirty-one suites
 - App Sandbox, Hardened Runtime, Developer ID signed and notarized
 
 ## Support

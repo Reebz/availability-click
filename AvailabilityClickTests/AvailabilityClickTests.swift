@@ -929,6 +929,64 @@ struct AvailabilityCalculationTests {
         let days = service.businessDaysForRange(.businessDays(3), from: monNoon, workingDays: [])
         #expect(days.isEmpty)
     }
+
+    @Test func allDayOutOfOffice_removesItsDays_bufferLeavesNextDayAlone() async {
+        // v1.3 U2: no blocking all-day event reached the per-day subtraction
+        // before. Out of Office Mon to Wed next week leaves Thu and Fri, and
+        // the event buffer does not push Thursday's first slot past 9am.
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        pinned[AppSettings.eventBufferMinutesKey] = 15
+        await withPinnedSettings(pinned) {
+            let away = StubEvent(
+                isAllDay: true, eventStart: date(2026, 3, 23), eventEnd: date(2026, 3, 26), isOutOfOffice: true
+            )
+            let result = service.calculateAvailability(
+                events: [away], rangeType: .nextWeek, now: date(2026, 3, 18, 12)
+            )
+            #expect(Set(result.keys) == [date(2026, 3, 26), date(2026, 3, 27)])
+            #expect(result[date(2026, 3, 26)]?.first?.start == date(2026, 3, 26, 9, 0))
+        }
+    }
+
+    @Test func daySlices_stayKeyedAtDayStart_whenAClockChangeSkipsMidnight() throws {
+        // Out of Office Fri Sep 4 to Fri Sep 11, 2026 in Santiago, where clocks
+        // jump from Sat 24:00 to Sun 01:00 on Sep 6. Every day after the jump
+        // must still be keyed at its start, or it would read as free.
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = try #require(TimeZone(identifier: "America/Santiago"))
+        func day(_ month: Int, _ d: Int, _ h: Int = 0, _ m: Int = 0, _ s: Int = 0) -> Date {
+            santiago.date(from: DateComponents(year: 2026, month: month, day: d, hour: h, minute: m, second: s))!
+        }
+        let slices = AvailabilityService.daySlices(
+            from: day(9, 4), to: day(9, 11, 23, 59, 59), clampedTo: day(8, 31)..<day(9, 14), calendar: santiago
+        )
+        let keys = slices.map(\.day)
+        #expect(keys.count == 8)
+        #expect(keys.allSatisfy { santiago.startOfDay(for: $0) == $0 })
+        #expect(keys.contains(day(9, 7)))
+        #expect(keys.contains(day(9, 11)))
+    }
+
+    @Test func tentativeSettingOn_leavesTentativeTimeFree() async {
+        // v1.3 U3: a Tentative 10-11 meeting next Monday.
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        pinned[AppSettings.eventBufferMinutesKey] = 0
+        let hold = StubEvent(eventStart: date(2026, 3, 23, 10), eventEnd: date(2026, 3, 23, 11), isTentativeAvailability: true)
+        let monday = date(2026, 3, 23)
+
+        pinned[AppSettings.treatTentativeAsFreeKey] = true
+        await withPinnedSettings(pinned) {
+            let result = service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12))
+            #expect(result[monday] == [TimeSlot(start: date(2026, 3, 23, 9), end: date(2026, 3, 23, 17))])
+        }
+        pinned[AppSettings.treatTentativeAsFreeKey] = false
+        await withPinnedSettings(pinned) {
+            let result = service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12))
+            #expect(result[monday]?.count == 2)
+        }
+    }
 }
 
 // ============================================================================
@@ -1154,6 +1212,10 @@ private struct StubEvent: BlockableEvent {
     var isCanceled = false
     var isFreeAvailability = false
     var isDeclinedByCurrentUser = false
+    var isOutOfOffice = false
+    var isBusyOnAvailabilityCalendar = false
+    var isTentativeAvailability = false
+    var isTentativeByCurrentUser = false
 }
 
 @Suite("Event Filter Matrix")
@@ -1223,6 +1285,123 @@ struct EventFilterMatrixTests {
         let event = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true)
         #expect(!service.shouldBlockTime(event))
     }
+
+    // MARK: All-day events that mark the sender away (v1.3 U2, R7-R9)
+
+    @Test func allDayCanceledOutOfOffice_blocksNothing() {
+        // AE13. Canceled comes before the all-day rule, so it never blocks.
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isCanceled: true, isOutOfOffice: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayDeclinedOutOfOffice_blocksNothing() {
+        // AE13
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isDeclinedByCurrentUser: true, isOutOfOffice: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayDeclinedRecordedBusy_blocksNothing() {
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isDeclinedByCurrentUser: true, isBusyOnAvailabilityCalendar: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayOutOfOffice_blocks() {
+        // AE5
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26), isOutOfOffice: true
+        )
+        #expect(service.shouldBlockTime(event))
+    }
+
+    @Test func midnightToMidnightOutOfOffice_blocks() {
+        let event = StubEvent(eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 28), isOutOfOffice: true)
+        #expect(service.isEffectivelyAllDay(event))
+        #expect(service.shouldBlockTime(event))
+    }
+
+    @Test func allDayBusy_blocksOnlyOnACalendarThatRecordsAvailability() {
+        // AE6. On a calendar that records Busy or Free, the EventKit seam
+        // reports the flag. On one that does not, the flag stays false.
+        let recorded = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isBusyOnAvailabilityCalendar: true
+        )
+        let notRecorded = StubEvent(isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26))
+        #expect(service.shouldBlockTime(recorded))
+        #expect(!service.shouldBlockTime(notRecorded))
+    }
+
+    @Test func allDayFree_blocksNothing() {
+        // AE7: a birthday marked Free.
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26), isFreeAvailability: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func timedOutOfOffice_stillBlocks() {
+        let (start, end) = busyHour()
+        #expect(service.shouldBlockTime(StubEvent(eventStart: start, eventEnd: end, isOutOfOffice: true)))
+    }
+
+    @Test func timedDeclinedOutOfOffice_blocksNothing() {
+        let (start, end) = busyHour()
+        let event = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true, isOutOfOffice: true)
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    @Test func allDayShownAsTentative_blocksNothing() {
+        // AE7 / R9: with the setting off, an all-day Tentative event stays free.
+        let event = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26), isTentativeAvailability: true
+        )
+        #expect(!service.shouldBlockTime(event))
+    }
+
+    // MARK: Tentative setting (v1.3 U3, R10-R12)
+
+    @Test func tentativeSetting_freesMaybeReplyAndTentativeEvent() {
+        // AE8: one meeting has my Maybe reply but shows as Busy, the other
+        // shows as Tentative. On, neither blocks. Off, both block.
+        let (start, end) = busyHour()
+        let maybe = StubEvent(eventStart: start, eventEnd: end, isTentativeByCurrentUser: true)
+        let tentative = StubEvent(eventStart: start, eventEnd: end, isTentativeAvailability: true)
+        #expect(!service.shouldBlockTime(maybe, treatTentativeAsFree: true))
+        #expect(!service.shouldBlockTime(tentative, treatTentativeAsFree: true))
+        #expect(service.shouldBlockTime(maybe, treatTentativeAsFree: false))
+        #expect(service.shouldBlockTime(tentative, treatTentativeAsFree: false))
+        #expect(service.shouldBlockTime(maybe))
+        #expect(service.shouldBlockTime(tentative))
+    }
+
+    @Test func tentativeSetting_freesAllDayRecordedBusyWithMaybeReply() {
+        // AE14
+        let teamDay = StubEvent(
+            isAllDay: true, eventStart: date(2026, 3, 25), eventEnd: date(2026, 3, 26),
+            isBusyOnAvailabilityCalendar: true, isTentativeByCurrentUser: true
+        )
+        #expect(!service.shouldBlockTime(teamDay, treatTentativeAsFree: true))
+        #expect(service.shouldBlockTime(teamDay, treatTentativeAsFree: false))
+    }
+
+    @Test func tentativeSetting_canceledOrDeclined_stillBlockNothing() {
+        let (start, end) = busyHour()
+        let canceled = StubEvent(eventStart: start, eventEnd: end, isCanceled: true, isTentativeAvailability: true)
+        let declined = StubEvent(eventStart: start, eventEnd: end, isDeclinedByCurrentUser: true, isTentativeByCurrentUser: true)
+        for event in [canceled, declined] {
+            #expect(!service.shouldBlockTime(event, treatTentativeAsFree: true))
+            #expect(!service.shouldBlockTime(event, treatTentativeAsFree: false))
+        }
+    }
 }
 
 // ============================================================================
@@ -1288,6 +1467,15 @@ struct RealKeySettingsBoundsTests {
             await withPinnedSettings([AppSettings.eventBufferMinutesKey: valid]) {
                 #expect(AppSettings.eventBufferMinutes == valid)
             }
+        }
+    }
+
+    @Test func treatTentativeAsFree_unsetKey_readsFalse() async {
+        // R10: off unless the user turns it on.
+        await withPinnedSettings([AppSettings.treatTentativeAsFreeKey: true]) {
+            #expect(AppSettings.treatTentativeAsFree)
+            UserDefaults.standard.removeObject(forKey: AppSettings.treatTentativeAsFreeKey)
+            #expect(!AppSettings.treatTentativeAsFree)
         }
     }
 }
@@ -1453,6 +1641,7 @@ struct AppIntentMappingTests {
         var textIntent = GetAvailabilityIntent()
         textIntent.range = .nextWeek
         textIntent.businessDays = 5
+        textIntent.timeZone = "Europe/Berlin"   // v1.3 addition (R18)
         var slotsIntent = GetAvailabilitySlotsIntent()
         slotsIntent.range = .next30Days
         slotsIntent.businessDays = 10
@@ -1461,6 +1650,7 @@ struct AppIntentMappingTests {
         s.endDate = date(2026, 3, 25, 10, 0)
         s.durationMinutes = 60
         #expect(textIntent.businessDays == 5 && slotsIntent.businessDays == 10)
+        #expect(textIntent.timeZone == "Europe/Berlin")
         #expect(s.durationMinutes == 60)
     }
 
@@ -2411,8 +2601,8 @@ struct TimezoneLabelTests {
         // A bare fixed-offset zone has no human name — .shortGeneric may be
         // nil or itself an offset. The point of the seam is that the chain
         // never crashes and always yields a non-empty string (named zones the
-        // picker actually offers get the readable name tested above). Such a
-        // synthetic zone is not selectable in the app.
+        // picker actually offers get the readable name tested above). The
+        // preview cannot select such a zone, but a Shortcut can pass one.
         let tz = try #require(TimeZone(secondsFromGMT: 5 * 3600))
         let name = AvailabilityFormatter.localizedZoneName(for: tz)
         #expect(!name.isEmpty)
@@ -2429,6 +2619,368 @@ struct TimezoneLabelTests {
         #expect(attrLast == plainLast)
         #expect(plainLast.hasPrefix("(") && plainLast.hasSuffix(")"))
         #expect(offsetTokenCount(plainLast) == 1)
+    }
+}
+
+// ============================================================================
+// MARK: - Clock-Change Timezone Line Tests (v1.3 U1, R1-R6/R21)
+// ============================================================================
+
+@Suite("Clock-Change Timezone Line")
+struct ClockChangeLineTests {
+    private let enUS = AvailabilityFormatter(locale: Locale(identifier: "en_US"))
+
+    private func zone(_ id: String) -> TimeZone {
+        TimeZone(identifier: id)!
+    }
+
+    /// A moment given as wall-clock time in `tz`, so each fixture means the
+    /// same thing on this Mac and on the UTC CI runner.
+    private func at(_ tz: TimeZone, _ month: Int, _ day: Int, _ hour: Int = 9) -> Date {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = tz
+        return c.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour))!
+    }
+
+    /// One-hour slots at 9am local time on each (month, day) in 2026.
+    private func slots(_ tz: TimeZone, _ days: [(Int, Int)]) -> [Date: [TimeSlot]] {
+        var result: [Date: [TimeSlot]] = [:]
+        for (month, day) in days {
+            let start = at(tz, month, day)
+            result[at(tz, month, day, 0), default: []]
+                .append(TimeSlot(start: start, end: start.addingTimeInterval(3600)))
+        }
+        return result
+    }
+
+    private func lastLine(_ text: String) -> String {
+        text.split(separator: "\n").map(String.init).last ?? ""
+    }
+
+    /// The zone name follows the Mac's locale, so it is read, not hardcoded.
+    private func name(_ tz: TimeZone) -> String {
+        AvailabilityFormatter.localizedZoneName(for: tz)
+    }
+
+    /// Whole-hour "GMT+n", for fixtures in zones without half-hour offsets.
+    private func gmt(_ tz: TimeZone, _ date: Date) -> String {
+        String(format: "GMT%+d", tz.secondsFromGMT(for: date) / 3600)
+    }
+
+    @Test func offsetFollowsSlots_notTheCopyMoment() {
+        // AE1: copied before Sydney's Oct 4 switch, every slot is after it.
+        let sydney = zone("Australia/Sydney")
+        let input = slots(sydney, [(10, 5), (10, 6), (10, 7), (10, 8), (10, 9)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: sydney)
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+11)")
+    }
+
+    @Test func changeInsideRange_addsNewOffsetAndDate() {
+        // AE2
+        let sydney = zone("Australia/Sydney")
+        let input = slots(sydney, [(9, 24), (10, 1), (10, 8), (10, 22)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: sydney)
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun Oct 4)")
+    }
+
+    @Test func noDaylightSaving_matchesV121Line() {
+        // AE3: Brisbane has no clock changes, so the line is the v1.2.1 one.
+        let brisbane = zone("Australia/Brisbane")
+        let input = slots(brisbane, [(9, 24), (10, 1), (10, 8), (10, 22)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: brisbane)
+        #expect(lastLine(output) == "(\(AvailabilityFormatter.timezoneString(for: brisbane)))")
+        #expect(lastLine(output) == "(\(name(brisbane)), GMT+10)")
+    }
+
+    @Test func passedZone_usesItsOwnChange() {
+        // AE16: Berlin's Oct 25 switch, whatever zone this Mac is in.
+        let berlin = zone("Europe/Berlin")
+        let input = slots(berlin, [(10, 19), (10, 23), (10, 26), (10, 30)])
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: berlin)
+        #expect(lastLine(output) == "(\(name(berlin)), GMT+2, then GMT+1 from Sun Oct 25)")
+    }
+
+    @Test func twoChangesInRange_listedInDateOrder() throws {
+        // AE17. This Mac's zone data has no Morocco change after Sep 20, 2026,
+        // so the two Ramadan changes are found from the start of 2026.
+        let casablanca = zone("Africa/Casablanca")
+        let first = try #require(casablanca.nextDaylightSavingTimeTransition(after: at(casablanca, 1, 1, 0)))
+        let second = try #require(casablanca.nextDaylightSavingTimeTransition(after: first))
+        let before = first.addingTimeInterval(-86_400)
+        let after = second.addingTimeInterval(86_400)
+        if let third = casablanca.nextDaylightSavingTimeTransition(after: second) {
+            try #require(after < third)
+        }
+        let input: [Date: [TimeSlot]] = [
+            before: [TimeSlot(start: before, end: before.addingTimeInterval(3600))],
+            after: [TimeSlot(start: after, end: after.addingTimeInterval(3600))],
+        ]
+        let label = DateFormatter()
+        label.locale = Locale(identifier: "en_US")
+        label.timeZone = casablanca
+        label.dateFormat = "EEE MMM d"
+        let expected = "(\(name(casablanca)), \(gmt(casablanca, before)), "
+            + "then \(gmt(casablanca, first)) from \(label.string(from: first)), "
+            + "then \(gmt(casablanca, second)) from \(label.string(from: second)))"
+
+        let output = enUS.format(slots: input, showTimeZone: true, timezone: casablanca)
+        #expect(lastLine(output) == expected)
+    }
+
+    @Test func halfHourZone_formatsBothOffsets() {
+        let lordHowe = zone("Australia/Lord_Howe")
+        let output = enUS.format(slots: slots(lordHowe, [(10, 1), (10, 8)]), showTimeZone: true, timezone: lordHowe)
+        #expect(lastLine(output) == "(\(name(lordHowe)), GMT+10:30, then GMT+11 from Sun Oct 4)")
+    }
+
+    @Test func changeDate_usesTheLocaleDayLabel() {
+        // R21: en_GB puts the day first in the day lines, so the change date does too.
+        let sydney = zone("Australia/Sydney")
+        let enGB = AvailabilityFormatter(locale: Locale(identifier: "en_GB"))
+        let output = enGB.format(slots: slots(sydney, [(9, 24), (10, 5)]), showTimeZone: true, timezone: sydney)
+        #expect(output.split(separator: "\n").contains { $0.hasPrefix("Mon 5 Oct:") })
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun 4 Oct)")
+    }
+
+    @Test func midnightFallBack_namesTheFirstDayOnTheNewOffset() {
+        // Egypt turns clocks back at 24:00 on Thu Oct 29, 2026. Thursday's
+        // working hours are all still GMT+3, so the change reads from Friday.
+        let cairo = zone("Africa/Cairo")
+        let output = enUS.format(slots: slots(cairo, [(10, 28), (10, 29), (10, 30)]), showTimeZone: true, timezone: cairo)
+        #expect(lastLine(output) == "(\(name(cairo)), GMT+3, then GMT+2 from Fri Oct 30)")
+
+        // Chile does the same at 24:00 on Sat Apr 4, 2026.
+        let santiago = zone("America/Santiago")
+        let chile = enUS.format(slots: slots(santiago, [(4, 2), (4, 6)]), showTimeZone: true, timezone: santiago)
+        #expect(lastLine(chile) == "(\(name(santiago)), GMT-3, then GMT-4 from Sun Apr 5)")
+    }
+
+    @Test func fixedOffsetZones_showOneCorrectlySignedOffset() throws {
+        // A Shortcut can pass UTC+10 or UTC-0:30 (U4), and those zones have no
+        // name beyond their offset.
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "GMT+1000"))) == "GMT+10")
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "GMT-0030"))) == "GMT-0:30")
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "Etc/GMT-10"))) == "GMT+10")
+        #expect(AvailabilityFormatter.timezoneString(for: try #require(TimeZone(identifier: "America/St_Johns")), at: at(zone("America/St_Johns"), 1, 15)).hasSuffix(", GMT-3:30"))
+
+        let slots = slots(zone("Australia/Sydney"), [(10, 5)])
+        let plusTen = GetAvailabilityIntent.composeText(slots: slots, timezone: try TimeZoneCatalog.resolve("UTC+10"), showTimeZone: false)
+        let minusHalf = GetAvailabilityIntent.composeText(slots: slots, timezone: try TimeZoneCatalog.resolve("UTC-0:30"), showTimeZone: false)
+        #expect(lastLine(plusTen) == "(GMT+10)")
+        #expect(lastLine(minusHalf) == "(GMT-0:30)")
+    }
+
+    @Test func firstSlotAfterChange_oneOffsetNoChange() {
+        // 9am on Sun Oct 4 is hours after Sydney's 2am switch.
+        let sydney = zone("Australia/Sydney")
+        let output = enUS.format(slots: slots(sydney, [(10, 4), (10, 9)]), showTimeZone: true, timezone: sydney)
+        #expect(lastLine(output) == "(\(name(sydney)), GMT+11)")
+    }
+
+    @Test func proposalSentence_listsChangeOnlyWhenItsSlotsCrossIt() {
+        let sydney = zone("Australia/Sydney")
+        func hourSlots(_ days: [(Int, Int)]) -> [TimeSlot] {
+            days.map { at(sydney, $0.0, $0.1) }.map { TimeSlot(start: $0, end: $0.addingTimeInterval(3600)) }
+        }
+        let crossing = enUS.formatProposal(
+            slots: hourSlots([(9, 30), (10, 1), (10, 6)]), showTimeZone: true, timezone: sydney
+        )
+        let allBefore = enUS.formatProposal(
+            slots: hourSlots([(9, 24), (9, 25), (9, 28)]), showTimeZone: true, timezone: sydney
+        )
+        #expect(lastLine(crossing) == "(\(name(sydney)), GMT+10, then GMT+11 from Sun Oct 4)")
+        #expect(lastLine(allBefore) == "(\(name(sydney)), GMT+10)")
+    }
+
+    @Test func richText_carriesTheSameLineAsPlain() {
+        // Zone pinned to Sydney so the check still means something on a UTC runner.
+        let sydney = zone("Australia/Sydney")
+        let input = slots(sydney, [(9, 24), (10, 1), (10, 8), (10, 22)])
+        let plain = lastLine(enUS.format(slots: input, showTimeZone: true, timezone: sydney))
+        let rich = lastLine(enUS.formatAttributed(slots: input, showTimeZone: true, timezone: sydney).string)
+        #expect(rich == plain)
+        #expect(rich.hasSuffix("then GMT+11 from Sun Oct 4)"))
+    }
+
+    @Test func emptySlots_stayEmptyText() {
+        let sydney = zone("Australia/Sydney")
+        #expect(enUS.format(slots: [:], showTimeZone: true, timezone: sydney) == "")
+        #expect(enUS.formatProposal(slots: [], showTimeZone: true, timezone: sydney) == "")
+        #expect(enUS.formatAttributed(slots: [:], showTimeZone: true, timezone: sydney).length == 0)
+    }
+
+    @Test func zoneLabel_withoutDate_usesTheCurrentOffset() {
+        // AE4 / R6: picker rows and the Settings label describe the zone now.
+        let sydney = zone("Australia/Sydney")
+        #expect(AvailabilityFormatter.timezoneString(for: sydney) == AvailabilityFormatter.timezoneString(for: sydney, at: Date()))
+        #expect(AvailabilityFormatter.timezoneString(for: sydney, at: at(sydney, 9, 23)) == "\(name(sydney)), GMT+10")
+    }
+
+    @Test func slotSubtitleOffset_isTheOffsetAtThatSlot() {
+        // R4 / KTD10. The subtitle reads the system zone, so this goes
+        // through the same helper with the zone pinned.
+        let sydney = zone("Australia/Sydney")
+        #expect(AvailabilityFormatter.timezoneString(for: sydney, at: at(sydney, 10, 5)) == "\(name(sydney)), GMT+11")
+    }
+}
+
+// ============================================================================
+// MARK: - Time Zone Catalog & Resolver Tests (v1.3 U4, R15/R17)
+// ============================================================================
+
+@Suite("Time Zone Resolver")
+struct TimeZoneResolverTests {
+    /// The text the resolver's error names, or nil when it did not throw
+    /// that error.
+    private func rejectedValue(_ input: String) -> String? {
+        do {
+            _ = try TimeZoneCatalog.resolve(input)
+            return nil
+        } catch GetAvailabilityError.unknownTimeZone(let value) {
+            return value
+        } catch {
+            return nil
+        }
+    }
+
+    @Test func noValue_meansNoZone() throws {
+        #expect(try TimeZoneCatalog.resolve(nil) == nil)
+    }
+
+    @Test func emptyOrBlank_meansNoZone() throws {
+        // AE15
+        #expect(try TimeZoneCatalog.resolve("") == nil)
+        #expect(try TimeZoneCatalog.resolve("   ") == nil)
+        #expect(try TimeZoneCatalog.resolve(" \n\t ") == nil)
+    }
+
+    @Test func strayWhitespace_isTrimmed() throws {
+        #expect(try TimeZoneCatalog.resolve(" Europe/Berlin ")?.identifier == "Europe/Berlin")
+    }
+
+    @Test func identifier_matchesInAnyCase() throws {
+        #expect(try TimeZoneCatalog.resolve("europe/berlin")?.identifier == "Europe/Berlin")
+        #expect(try TimeZoneCatalog.resolve("EUROPE/BERLIN")?.identifier == "Europe/Berlin")
+    }
+
+    @Test func legacyAliases_resolve() throws {
+        let pacific = try #require(try TimeZoneCatalog.resolve("US/Pacific"))
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let january = utc.date(from: DateComponents(year: 2026, month: 1, day: 15))!
+        let july = utc.date(from: DateComponents(year: 2026, month: 7, day: 15))!
+        #expect(pacific.secondsFromGMT(for: january) == -8 * 3600)
+        #expect(pacific.secondsFromGMT(for: july) == -7 * 3600)
+
+        let plusTen = try #require(try TimeZoneCatalog.resolve("UTC+10"))
+        #expect(plusTen.secondsFromGMT(for: january) == 10 * 3600)
+        #expect(plusTen.secondsFromGMT(for: july) == 10 * 3600)
+        #expect(try TimeZoneCatalog.resolve("utc")?.secondsFromGMT() == 0)
+    }
+
+    @Test func bareAbbreviations_throwNamingTheValue() {
+        // The system resolves BST to Bangladesh and IST to India.
+        for abbreviation in ["BST", "IST", "EST"] {
+            #expect(rejectedValue(abbreviation) == abbreviation)
+        }
+    }
+
+    @Test func misspelledZone_throwsWithClearMessage() {
+        // AE11
+        #expect(rejectedValue("Europe/Berln") == "Europe/Berln")
+        #expect(rejectedValue("  Europe/Berln ") == "Europe/Berln")
+        let message = String(localized: GetAvailabilityError.unknownTimeZone("Europe/Berln").localizedStringResource)
+        #expect(message == "Availability Click doesn't recognize the time zone \"Europe/Berln\". Use a name such as Europe/Berlin or America/New_York, or leave the time zone empty to use this Mac's own.")
+        #expect(message.contains("Europe/Berln"))
+    }
+
+    @Test func previewSearch_unchangedByTheMove() {
+        // The v1.2.1 preview search, rebuilt here as the reference.
+        let query = "berlin"
+        let expected = TimeZone.knownTimeZoneIdentifiers
+            .compactMap { TimeZone(identifier: $0) }
+            .sorted { $0.secondsFromGMT() < $1.secondsFromGMT() }
+            .filter { tz in
+                tz.identifier.lowercased().contains(query)
+                    || (tz.abbreviation() ?? "").lowercased().contains(query)
+                    || (tz.localizedName(for: .standard, locale: .current) ?? "").lowercased().contains(query)
+            }
+            .map(\.identifier)
+        #expect(expected.contains("Europe/Berlin"))
+        #expect(TimeZoneCatalog.search(query).map(\.identifier) == expected)
+        #expect(TimeZoneCatalog.search("").count == 20)
+    }
+
+    @Test func shortcutsPickerList_isEveryKnownZoneInOrder() {
+        #expect(TimeZoneCatalog.identifiers == TimeZone.knownTimeZoneIdentifiers.sorted())
+    }
+}
+
+// ============================================================================
+// MARK: - Shortcut Timezone Input Tests (v1.3 U5, R15/R16/R20)
+// ============================================================================
+
+@Suite("Shortcut Timezone Input")
+struct ShortcutTimezoneInputTests {
+    private let berlin = TimeZone(identifier: "Europe/Berlin")!
+
+    /// 21:00-22:00 UTC on Tue Oct 20, 2026: late Tuesday in Berlin, early
+    /// Wednesday in Sydney.
+    private var lateTuesdayInBerlin: [Date: [TimeSlot]] {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let start = utc.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 21))!
+        return [start: [TimeSlot(start: start, end: start.addingTimeInterval(3600))]]
+    }
+
+    private func weekday(_ date: Date, in tz: TimeZone) -> String {
+        let f = DateFormatter()
+        f.locale = .autoupdatingCurrent
+        f.timeZone = tz
+        f.dateFormat = "EEE"
+        return f.string(from: date)
+    }
+
+    @Test func zoneGiven_usesItAndForcesTheLine() throws {
+        // AE10: "Show recipient timezone" off, Europe/Berlin passed.
+        let slots = lateTuesdayInBerlin
+        let start = try #require(slots.values.first?.first?.start)
+        let text = GetAvailabilityIntent.composeText(slots: slots, timezone: berlin, showTimeZone: false)
+        let lines = text.split(separator: "\n").map(String.init)
+
+        #expect(text == AvailabilityFormatter().format(slots: slots, showTimeZone: true, template: .plainText, timezone: berlin))
+        #expect(lines.first?.hasPrefix(weekday(start, in: berlin)) == true)
+        #expect(lines.last == "(\(AvailabilityFormatter.localizedZoneName(for: berlin)), GMT+2)")
+    }
+
+    @Test func noZone_matchesTheV121Output() {
+        // AE12: the text the v1.2.1 action returned for the same slots and settings.
+        let slots = lateTuesdayInBerlin
+        for showTimeZone in [false, true] {
+            #expect(
+                GetAvailabilityIntent.composeText(slots: slots, timezone: nil, showTimeZone: showTimeZone)
+                    == AvailabilityFormatter().format(slots: slots, showTimeZone: showTimeZone, template: .plainText)
+            )
+        }
+    }
+
+    @Test func noZone_lineSetting_addsSystemZoneLine() throws {
+        let slots = lateTuesdayInBerlin
+        let start = try #require(slots.values.first?.first?.start)
+        let off = GetAvailabilityIntent.composeText(slots: slots, timezone: nil, showTimeZone: false)
+        let on = GetAvailabilityIntent.composeText(slots: slots, timezone: nil, showTimeZone: true)
+        #expect(!off.contains("GMT"))
+        #expect(on.split(separator: "\n").last.map(String.init) == "(\(AvailabilityFormatter.timezoneString(at: start)))")
+    }
+
+    @Test func noSlots_emptyText_withOrWithoutZone() {
+        // AE18 / R20
+        #expect(GetAvailabilityIntent.composeText(slots: [:], timezone: berlin, showTimeZone: false) == "")
+        #expect(GetAvailabilityIntent.composeText(slots: [:], timezone: nil, showTimeZone: true) == "")
+    }
+
+    @Test func picker_listsTheSharedZoneList() async throws {
+        #expect(try await TimeZoneOptionsProvider().results() == TimeZoneCatalog.identifiers)
     }
 }
 
@@ -2708,6 +3260,47 @@ struct StaleWatchGuardTests {
         await withPinnedSettings(stockWorkingSettings) { base = .current }
         await withPinnedSettings(altered) { changed = .current }
         #expect(base != changed)
+    }
+
+    @Test func settingsSignature_followsTentativeSetting() async {
+        // AE9 / R13: flipping the setting after a copy changes the signature,
+        // so the recheck skips instead of raising a "no longer free" badge.
+        var off: [String: Any] = stockWorkingSettings
+        off[AppSettings.treatTentativeAsFreeKey] = false
+        var on = off
+        on[AppSettings.treatTentativeAsFreeKey] = true
+        var a: SlotSettingsSignature?
+        var b: SlotSettingsSignature?
+        var c: SlotSettingsSignature?
+        await withPinnedSettings(off) { a = .current }
+        await withPinnedSettings(off) { b = .current }
+        await withPinnedSettings(on) { c = .current }
+        #expect(a == b)
+        #expect(a != c)
+    }
+
+    @Test func overwriteGuard_seesTentativeSettingFlipAsChangedSlots() async {
+        // KTD6 parity: the guard compares slots, not settings, so copying the
+        // same range after the flip asks for confirmation like an hours change.
+        var pinned: [String: Any] = stockWorkingSettings
+        pinned[AppSettings.workingDaysKey] = [2, 3, 4, 5, 6]
+        pinned[AppSettings.eventBufferMinutesKey] = 0
+        let hold = StubEvent(eventStart: date(2026, 3, 23, 10), eventEnd: date(2026, 3, 23, 11), isTentativeByCurrentUser: true)
+        let service = AvailabilityService()
+        var before: Set<TimeSlot> = []
+        var after: Set<TimeSlot> = []
+
+        pinned[AppSettings.treatTentativeAsFreeKey] = false
+        await withPinnedSettings(pinned) {
+            before = Set(service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12)).values.joined())
+        }
+        pinned[AppSettings.treatTentativeAsFreeKey] = true
+        await withPinnedSettings(pinned) {
+            after = Set(service.calculateAvailability(events: [hold], rangeType: .nextWeek, now: date(2026, 3, 18, 12)).values.joined())
+        }
+        #expect(AppDelegate.overwriteGuardSlotsDiffer(
+            watchedRange: .nextWeek, watchedSlots: before, range: .nextWeek, offered: after
+        ))
     }
 
     // MARK: - Trailing debounce coalescing (KTD11)

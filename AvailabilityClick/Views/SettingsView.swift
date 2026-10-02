@@ -27,6 +27,9 @@ struct SettingsView: View {
     @AppStorage(AppSettings.showAsOfStampKey)
     private var showAsOfStamp = false
 
+    @AppStorage(AppSettings.treatTentativeAsFreeKey)
+    private var treatTentativeAsFree = false
+
     @AppStorage(AppSettings.launchAtLoginKey)
     private var launchAtLogin = false
 
@@ -246,6 +249,8 @@ struct SettingsView: View {
                 )
 
                 Toggle("Append \"as of\" date & time", isOn: $showAsOfStamp)
+
+                Toggle("Treat my Maybe replies and Tentative events as free", isOn: $treatTentativeAsFree)
 
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in

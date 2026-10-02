@@ -34,11 +34,12 @@ struct AvailabilitySlot: TransientAppEntity {
 
     /// Formatted title + timezone subtitle for the Shortcuts result card
     /// (KTD2). Presentation only — the raw dates above stay the value fields.
+    /// The subtitle's offset is the one in effect at this slot's start (R4).
     var displayRepresentation: DisplayRepresentation {
         let title = AvailabilityFormatter().formatTimeRange(TimeSlot(start: startDate, end: endDate))
         return DisplayRepresentation(
             title: "\(title)",
-            subtitle: "\(AvailabilityFormatter.timezoneString())"
+            subtitle: "\(AvailabilityFormatter.timezoneString(at: startDate))"
         )
     }
 }
